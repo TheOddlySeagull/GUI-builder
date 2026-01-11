@@ -34,6 +34,12 @@ class GuiBuilderApp:
         self.canvas_px = 640
         self.cell_px = self.canvas_px // self.grid_n
 
+        # Canvas sizing/centering state (grid is centered inside the canvas widget).
+        self._canvas_widget_w = self.canvas_px
+        self._canvas_widget_h = self.canvas_px
+        self._canvas_offset_x = 0
+        self._canvas_offset_y = 0
+
         # Multi-page data model
         self.pages: Dict[int, PageState] = {}
         self.current_page_id: int = 1
@@ -50,11 +56,6 @@ class GuiBuilderApp:
 
         self.current_tool: Tool = Tool.BACKGROUND
         self.preview_mode = False
-
-        # Hover defaults for newly placed entries (stored into Entry.meta["hover"])
-        self.hover_tool_defaults: Dict[Tool, Dict[str, Any]] = {
-            t: {"enabled": False, "text": ""} for t in Tool if t != Tool.BACKGROUND
-        }
 
         # Editor selection state (right-click)
         self.selected_entry_id: Optional[int] = None
@@ -230,9 +231,40 @@ class GuiBuilderApp:
         outer.pack(fill="both", expand=True)
 
         # Fixed-width left pane so tool labels can wrap cleanly.
-        left = tk.Frame(outer, padx=8, pady=8, width=230)
-        left.pack(side="left", fill="y")
-        left.pack_propagate(False)
+        left_pane = tk.Frame(outer, padx=8, pady=8, width=230)
+        left_pane.pack(side="left", fill="y")
+        left_pane.pack_propagate(False)
+
+        # Scrollable container inside the fixed-width left pane.
+        left_scroll = tk.Scrollbar(left_pane, orient="vertical")
+        left_scroll.pack(side="right", fill="y")
+
+        left_canvas = tk.Canvas(left_pane, highlightthickness=0, borderwidth=0, yscrollcommand=left_scroll.set)
+        left_canvas.pack(side="left", fill="both", expand=True)
+        left_scroll.configure(command=left_canvas.yview)
+
+        left = tk.Frame(left_canvas)
+        left_window = left_canvas.create_window((0, 0), window=left, anchor="nw")
+
+        def _on_left_inner_configure(_e: tk.Event) -> None:
+            # Update scroll region and keep inner frame width in sync.
+            bbox = left_canvas.bbox("all")
+            if bbox:
+                left_canvas.configure(scrollregion=bbox)
+            left_canvas.itemconfigure(left_window, width=left_canvas.winfo_width())
+
+        def _on_left_canvas_configure(e: tk.Event) -> None:
+            left_canvas.itemconfigure(left_window, width=e.width)
+
+        def _on_left_mousewheel(e: tk.Event) -> None:
+            # Windows: event.delta is typically multiples of 120.
+            delta = int(-1 * (e.delta / 120)) if e.delta else 0
+            if delta:
+                left_canvas.yview_scroll(delta, "units")
+
+        left.bind("<Configure>", _on_left_inner_configure)
+        left_canvas.bind("<Configure>", _on_left_canvas_configure)
+        left_canvas.bind("<MouseWheel>", _on_left_mousewheel)
 
         right = tk.Frame(outer, padx=8, pady=8)
         right.pack(side="right", fill="both", expand=True)
@@ -373,42 +405,6 @@ class GuiBuilderApp:
 
         tk.Label(left, text="").pack()
 
-        # Hover text defaults for newly placed elements (all tools except background)
-        self.hover_defaults_frame = tk.Frame(left)
-        self.hover_defaults_frame.pack(fill="x")
-
-        tk.Label(self.hover_defaults_frame, text="Hover Text (new elements)", font=("TkDefaultFont", 10, "bold")).pack(
-            anchor="w"
-        )
-        self.hover_default_enabled_var = tk.BooleanVar(value=False)
-        self.hover_default_text_var = tk.StringVar(value="")
-
-        def apply_hover_defaults() -> None:
-            if self.current_tool == Tool.BACKGROUND:
-                return
-            self.hover_tool_defaults[self.current_tool] = {
-                "enabled": bool(self.hover_default_enabled_var.get()),
-                "text": str(self.hover_default_text_var.get()),
-            }
-
-        tk.Checkbutton(
-            self.hover_defaults_frame,
-            text="Show hover text",
-            variable=self.hover_default_enabled_var,
-            command=apply_hover_defaults,
-            anchor="w",
-            justify="left",
-            wraplength=210,
-        ).pack(fill="x", anchor="w")
-
-        tk.Label(self.hover_defaults_frame, text="Text (optional):", anchor="w").pack(anchor="w")
-        hover_text_entry = tk.Entry(self.hover_defaults_frame, textvariable=self.hover_default_text_var)
-        hover_text_entry.pack(fill="x")
-        hover_text_entry.bind("<KeyRelease>", lambda _e: apply_hover_defaults())
-        hover_text_entry.bind("<FocusOut>", lambda _e: apply_hover_defaults())
-
-        tk.Label(left, text="").pack()
-
         # Selected element meta panel (right-click an element in EDIT mode)
         self.selection_frame = tk.Frame(left)
         self.selection_frame.pack(fill="x")
@@ -419,12 +415,14 @@ class GuiBuilderApp:
 
         self.sel_hover_enabled_var = tk.BooleanVar(value=False)
         self.sel_hover_text_var = tk.StringVar(value="")
+        self.sel_allow_hover_var = tk.BooleanVar(value=True)
 
-        def apply_selected_hover_meta() -> None:
+        def apply_selected_meta() -> None:
             ent = self.entries.get(self.selected_entry_id) if self.selected_entry_id is not None else None
             if not ent:
                 return
             meta = ent.meta if isinstance(ent.meta, dict) else {}
+            meta["allow_hover"] = bool(self.sel_allow_hover_var.get())
             meta["hover"] = {
                 "enabled": bool(self.sel_hover_enabled_var.get()),
                 "text": str(self.sel_hover_text_var.get()),
@@ -433,9 +431,19 @@ class GuiBuilderApp:
 
         tk.Checkbutton(
             self.selection_frame,
+            text="Allow hover texture",
+            variable=self.sel_allow_hover_var,
+            command=apply_selected_meta,
+            anchor="w",
+            justify="left",
+            wraplength=210,
+        ).pack(fill="x", anchor="w")
+
+        tk.Checkbutton(
+            self.selection_frame,
             text="Show hover text",
             variable=self.sel_hover_enabled_var,
-            command=apply_selected_hover_meta,
+            command=apply_selected_meta,
             anchor="w",
             justify="left",
             wraplength=210,
@@ -444,12 +452,116 @@ class GuiBuilderApp:
         tk.Label(self.selection_frame, text="Text (optional):", anchor="w").pack(anchor="w")
         sel_text_entry = tk.Entry(self.selection_frame, textvariable=self.sel_hover_text_var)
         sel_text_entry.pack(fill="x")
-        sel_text_entry.bind("<KeyRelease>", lambda _e: apply_selected_hover_meta())
-        sel_text_entry.bind("<FocusOut>", lambda _e: apply_selected_hover_meta())
+        sel_text_entry.bind("<KeyRelease>", lambda _e: apply_selected_meta())
+        sel_text_entry.bind("<FocusOut>", lambda _e: apply_selected_meta())
 
-        tk.Button(self.selection_frame, text="Clear selection", command=self._clear_selection).pack(fill="x", pady=(4, 0))
+        # Button-specific metadata (for standard buttons)
+        self.sel_button_meta_frame = tk.Frame(self.selection_frame)
+        self.sel_button_meta_frame.pack(fill="x", pady=(6, 0))
 
-        tk.Label(left, text="Grid", font=("TkDefaultFont", 10, "bold")).pack(anchor="w")
+        tk.Label(self.sel_button_meta_frame, text="Button Action", font=("TkDefaultFont", 9, "bold")).pack(anchor="w")
+        self.sel_btn_action_var = tk.StringVar(value="none")
+        self.sel_btn_target_var = tk.StringVar(value="1")
+        self.sel_btn_modulo_var = tk.BooleanVar(value=True)
+
+        def apply_selected_button_meta() -> None:
+            ent = self.entries.get(self.selected_entry_id) if self.selected_entry_id is not None else None
+            if not ent:
+                return
+            if ent.tool != Tool.BUTTON_STANDARD:
+                return
+
+            mode = str(self.sel_btn_action_var.get())
+            try:
+                target_id = int(self.sel_btn_target_var.get())
+            except ValueError:
+                target_id = 1
+                self.sel_btn_target_var.set("1")
+
+            meta = ent.meta if isinstance(ent.meta, dict) else {}
+            meta["page_change"] = {
+                "mode": mode,
+                "target_page_id": target_id,
+                "modulo": bool(self.sel_btn_modulo_var.get()),
+            }
+            ent.meta = meta
+
+        def on_sel_btn_action_changed() -> None:
+            apply_selected_button_meta()
+            if self.sel_btn_action_var.get() == "goto":
+                self.sel_btn_target_row.pack(fill="x", padx=(18, 0), pady=(0, 2))
+            else:
+                self.sel_btn_target_row.pack_forget()
+
+        tk.Radiobutton(
+            self.sel_button_meta_frame,
+            text="None",
+            value="none",
+            variable=self.sel_btn_action_var,
+            command=on_sel_btn_action_changed,
+            anchor="w",
+            justify="left",
+        ).pack(fill="x", anchor="w")
+
+        tk.Radiobutton(
+            self.sel_button_meta_frame,
+            text="Go to page ID",
+            value="goto",
+            variable=self.sel_btn_action_var,
+            command=on_sel_btn_action_changed,
+            anchor="w",
+            justify="left",
+        ).pack(fill="x", anchor="w")
+
+        self.sel_btn_target_row = tk.Frame(self.sel_button_meta_frame)
+        self.sel_btn_target_row.pack(fill="x", padx=(18, 0), pady=(0, 2))
+        tk.Label(self.sel_btn_target_row, text="Target ID:").pack(side="left")
+        sel_target_entry = tk.Entry(self.sel_btn_target_row, textvariable=self.sel_btn_target_var, width=8)
+        sel_target_entry.pack(side="left", padx=(6, 0))
+        sel_target_entry.bind("<KeyRelease>", lambda _e: apply_selected_button_meta())
+        sel_target_entry.bind("<FocusOut>", lambda _e: apply_selected_button_meta())
+
+        tk.Radiobutton(
+            self.sel_button_meta_frame,
+            text="Next page (ID+1)",
+            value="next",
+            variable=self.sel_btn_action_var,
+            command=on_sel_btn_action_changed,
+            anchor="w",
+            justify="left",
+        ).pack(fill="x", anchor="w")
+
+        tk.Radiobutton(
+            self.sel_button_meta_frame,
+            text="Previous page (ID-1)",
+            value="prev",
+            variable=self.sel_btn_action_var,
+            command=on_sel_btn_action_changed,
+            anchor="w",
+            justify="left",
+        ).pack(fill="x", anchor="w")
+
+        tk.Checkbutton(
+            self.sel_button_meta_frame,
+            text="Modulo wrap (last -> first)",
+            variable=self.sel_btn_modulo_var,
+            command=apply_selected_button_meta,
+            anchor="w",
+            justify="left",
+            wraplength=210,
+        ).pack(fill="x", anchor="w", pady=(2, 0))
+
+        # Hidden by default; shown only for standard buttons.
+        self.sel_button_meta_frame.pack_forget()
+
+        self.clear_selection_btn = tk.Button(self.selection_frame, text="Clear selection", command=self._clear_selection)
+        self.clear_selection_btn.pack(fill="x", pady=(4, 0))
+
+        # Start hidden until something is selected.
+        self.selection_frame.pack_forget()
+
+        self.grid_section_label = tk.Label(left, text="Grid", font=("TkDefaultFont", 10, "bold"))
+        self.grid_section_label.pack(anchor="w")
         self.grid_btn = tk.Button(left, text="Toggle 16×16 / 32×32", command=self.toggle_grid)
         self.grid_btn.pack(fill="x")
 
@@ -481,7 +593,7 @@ class GuiBuilderApp:
             bg="#1e1e1e",
             highlightthickness=0,
         )
-        self.canvas.pack()
+        self.canvas.pack(fill="both", expand=True)
 
         self.help = tk.Label(
             right,
@@ -499,7 +611,6 @@ class GuiBuilderApp:
         self.help.pack(fill="x", pady=(6, 0))
 
         self._refresh_std_btn_meta_visibility()
-        self._refresh_hover_defaults_ui()
         self._refresh_selection_ui()
 
     def _bind_events(self) -> None:
@@ -508,6 +619,41 @@ class GuiBuilderApp:
         self.canvas.bind("<ButtonRelease-1>", self.on_left_release)
         self.canvas.bind("<Motion>", self.on_motion)
         self.canvas.bind("<ButtonPress-3>", self.on_right_press)
+        self.canvas.bind("<Configure>", self._on_canvas_configure)
+
+    def _on_canvas_configure(self, event: tk.Event) -> None:
+        """Keep the grid scaled and centered when the window is resized."""
+        try:
+            w = int(event.width)
+            h = int(event.height)
+        except Exception:
+            return
+
+        if w <= 1 or h <= 1:
+            return
+
+        self._canvas_widget_w = w
+        self._canvas_widget_h = h
+
+        # Fit a square grid into the available canvas area.
+        side = min(w, h)
+        cell_px = max(1, side // self.grid_n)
+        grid_px = cell_px * self.grid_n
+
+        self._canvas_offset_x = max(0, (w - grid_px) // 2)
+        self._canvas_offset_y = max(0, (h - grid_px) // 2)
+
+        # Only trigger a redraw if sizing changed.
+        if grid_px != self.canvas_px or cell_px != self.cell_px:
+            self.canvas_px = grid_px
+            self.cell_px = cell_px
+
+            # Background caches depend on cell_px/canvas_px.
+            self._preview_background_cache_key = None
+            self._preview_background_image = None
+
+        # Redraw on any resize (offsets may have changed even if cell_px didn't).
+        self.redraw()
 
     # ----------------------------
     # Helpers
@@ -563,7 +709,6 @@ class GuiBuilderApp:
         self.current_tool = Tool(self.tool_var.get())
         self.set_status(f"Tool: {self.current_tool.value}")
         self._refresh_std_btn_meta_visibility()
-        self._refresh_hover_defaults_ui()
 
     def _refresh_std_btn_meta_visibility(self) -> None:
         if not hasattr(self, "std_btn_meta_frame"):
@@ -580,36 +725,63 @@ class GuiBuilderApp:
             else:
                 self.std_btn_target_row.pack_forget()
 
-    def _refresh_hover_defaults_ui(self) -> None:
-        if not hasattr(self, "hover_defaults_frame"):
-            return
-
-        if self.current_tool == Tool.BACKGROUND:
-            self.hover_defaults_frame.pack_forget()
-            return
-
-        self.hover_defaults_frame.pack(fill="x")
-        defaults = self.hover_tool_defaults.get(self.current_tool, {"enabled": False, "text": ""})
-        self.hover_default_enabled_var.set(bool(defaults.get("enabled", False)))
-        self.hover_default_text_var.set(str(defaults.get("text", "")))
-
     def _refresh_selection_ui(self) -> None:
         if not hasattr(self, "selection_frame"):
             return
 
         ent = self.entries.get(self.selected_entry_id) if self.selected_entry_id is not None else None
         if not ent:
+            if self.selection_frame.winfo_ismapped():
+                self.selection_frame.pack_forget()
             self.selected_info_var.set("(none)")
             self.sel_hover_enabled_var.set(False)
             self.sel_hover_text_var.set("")
+            self.sel_allow_hover_var.set(True)
+            if hasattr(self, "sel_button_meta_frame") and self.sel_button_meta_frame.winfo_ismapped():
+                self.sel_button_meta_frame.pack_forget()
             return
 
+        # Ensure the selection panel is visible in its intended position.
+        if not self.selection_frame.winfo_ismapped():
+            if hasattr(self, "grid_section_label"):
+                self.selection_frame.pack(fill="x", before=self.grid_section_label)
+            else:
+                self.selection_frame.pack(fill="x")
+
         self.selected_info_var.set(f"ID {ent.entry_id} | {ent.tool.value}")
-        hover = ent.meta.get("hover") if isinstance(ent.meta, dict) else None
+        meta = ent.meta if isinstance(ent.meta, dict) else {}
+        self.sel_allow_hover_var.set(bool(meta.get("allow_hover", True)))
+        hover = meta.get("hover")
         if not isinstance(hover, dict):
             hover = {"enabled": False, "text": ""}
         self.sel_hover_enabled_var.set(bool(hover.get("enabled", False)))
         self.sel_hover_text_var.set(str(hover.get("text", "")))
+
+        # Button options only apply to standard buttons.
+        if hasattr(self, "sel_button_meta_frame"):
+            if ent.tool == Tool.BUTTON_STANDARD:
+                if not self.sel_button_meta_frame.winfo_ismapped():
+                    if hasattr(self, "clear_selection_btn"):
+                        self.sel_button_meta_frame.pack(fill="x", pady=(6, 0), before=self.clear_selection_btn)
+                    else:
+                        self.sel_button_meta_frame.pack(fill="x", pady=(6, 0))
+
+                page_change = meta.get("page_change")
+                if not isinstance(page_change, dict):
+                    page_change = {"mode": "none", "target_page_id": 1, "modulo": True}
+
+                mode = str(page_change.get("mode", "none"))
+                self.sel_btn_action_var.set(mode)
+                self.sel_btn_modulo_var.set(bool(page_change.get("modulo", True)))
+                self.sel_btn_target_var.set(str(page_change.get("target_page_id", 1)))
+
+                if mode == "goto":
+                    self.sel_btn_target_row.pack(fill="x", padx=(18, 0), pady=(0, 2))
+                else:
+                    self.sel_btn_target_row.pack_forget()
+            else:
+                if self.sel_button_meta_frame.winfo_ismapped():
+                    self.sel_button_meta_frame.pack_forget()
 
     def _clear_selection(self) -> None:
         self.selected_entry_id = None
@@ -729,6 +901,8 @@ class GuiBuilderApp:
         self.canvas.tag_raise(text_id, rect_id)
 
     def _xy_to_cell(self, x: int, y: int) -> Optional[Tuple[int, int]]:
+        x -= self._canvas_offset_x
+        y -= self._canvas_offset_y
         if x < 0 or y < 0 or x >= self.canvas_px or y >= self.canvas_px:
             return None
         cx = x // self.cell_px
@@ -791,11 +965,11 @@ class GuiBuilderApp:
             # Snapshot tool metadata into the entry so changes only affect newly placed buttons.
             ent.meta = json.loads(json.dumps(self.standard_button_tool_meta))
 
-        # Snapshot hover defaults into the entry meta for ALL placed elements (except background tool).
+        # New entries default to: allow hover textures, but no hover tooltip text.
         if self.current_tool != Tool.BACKGROUND:
-            hover_defaults = self.hover_tool_defaults.get(self.current_tool, {"enabled": False, "text": ""})
             meta = ent.meta if isinstance(ent.meta, dict) else {}
-            meta["hover"] = json.loads(json.dumps(hover_defaults))
+            meta.setdefault("allow_hover", True)
+            meta.setdefault("hover", {"enabled": False, "text": ""})
             ent.meta = meta
         self.entries[eid] = ent
 
@@ -1144,7 +1318,13 @@ class GuiBuilderApp:
 
         # MVP: clear on toggle
         self.grid_n = new_n
-        self.cell_px = self.canvas_px // self.grid_n
+
+        # Recompute sizing based on current canvas widget size.
+        w = int(self.canvas.winfo_width()) if hasattr(self, "canvas") else self.canvas_px
+        h = int(self.canvas.winfo_height()) if hasattr(self, "canvas") else self.canvas_px
+        side = min(max(1, w), max(1, h))
+        self.cell_px = max(1, side // self.grid_n)
+        self.canvas_px = self.cell_px * self.grid_n
 
         self.pages.clear()
         self.current_page_id = 1
@@ -1244,12 +1424,32 @@ class GuiBuilderApp:
         self.redraw()
 
     def _scale_factors(self) -> Tuple[int, int]:
-        """Return (zoom, subsample) factors so: TILE_PX * zoom / subsample == cell_px."""
-        if self.cell_px == 40:
-            return 5, 2  # 16*5/2=40
-        if self.cell_px == 20:
-            return 5, 4  # 16*5/4=20
-        return 1, 1
+        """Return (zoom, subsample) factors so: TILE_PX * zoom / subsample ~= cell_px."""
+        cell_px = int(self.cell_px)
+        if cell_px <= 0:
+            return 1, 1
+
+        tile_px = int(TILE_PX)
+        if tile_px <= 0:
+            return 1, 1
+
+        best_zoom, best_sub = 1, 1
+        best_err = abs(tile_px - cell_px)
+        best_complexity = best_zoom * best_sub
+
+        for sub in range(1, 65):
+            zoom = int(round((cell_px * sub) / tile_px))
+            if zoom < 1 or zoom > 64:
+                continue
+            scaled = (tile_px * zoom) / sub
+            err = abs(scaled - cell_px)
+            complexity = zoom * sub
+            if err < best_err - 1e-9 or (abs(err - best_err) <= 1e-9 and complexity < best_complexity):
+                best_zoom, best_sub = zoom, sub
+                best_err = err
+                best_complexity = complexity
+
+        return best_zoom, best_sub
 
     def _get_scaled_background_tile(self) -> Optional[tk.PhotoImage]:
         src = self._background_texture_src
@@ -1357,7 +1557,10 @@ class GuiBuilderApp:
 
     def _entry_visual_state(self, ent: Entry) -> str:
         """Return a small state label for picking tiles."""
-        hovered = self.preview_mode and (self._preview_hover_entry_id == ent.entry_id)
+        hovered_raw = self.preview_mode and (self._preview_hover_entry_id == ent.entry_id)
+        meta = ent.meta if isinstance(ent.meta, dict) else {}
+        allow_hover = bool(meta.get("allow_hover", True))
+        hovered = hovered_raw and allow_hover
 
         if ent.tool in (Tool.BUTTON_STANDARD, Tool.BUTTON_TOGGLE, Tool.BUTTON_PRESS):
             pressed = False
@@ -1412,8 +1615,8 @@ class GuiBuilderApp:
             tile = sheet.get_tile(ox + dx, oy + dy, self.cell_px)
             if tile is None:
                 return False
-            x0 = cx * self.cell_px
-            y0 = cy * self.cell_px
+            x0 = self._canvas_offset_x + (cx * self.cell_px)
+            y0 = self._canvas_offset_y + (cy * self.cell_px)
             self.canvas.create_image(x0, y0, anchor="nw", image=tile)
 
         return True
@@ -1435,8 +1638,8 @@ class GuiBuilderApp:
             tile = sheet.get_tile(ox + dx, oy + dy, self.cell_px)
             if tile is None:
                 return False
-            x0 = cx * self.cell_px
-            y0 = cy * self.cell_px
+            x0 = self._canvas_offset_x + (cx * self.cell_px)
+            y0 = self._canvas_offset_y + (cy * self.cell_px)
             self.canvas.create_image(x0, y0, anchor="nw", image=tile)
 
         return True
@@ -1639,7 +1842,7 @@ class GuiBuilderApp:
             bg_img = self._build_preview_background_image()
             if bg_img is not None:
                 # Keep reference via self._preview_background_image (set by builder)
-                self.canvas.create_image(0, 0, anchor="nw", image=bg_img)
+                self.canvas.create_image(self._canvas_offset_x, self._canvas_offset_y, anchor="nw", image=bg_img)
             else:
                 for (x, y) in bg_cells:
                     self._draw_cell_fill(x, y, "#2b2b2b")
@@ -1668,10 +1871,10 @@ class GuiBuilderApp:
 
     def _draw_hover_outline(self, ent: Entry) -> None:
         r = ent.rect.normalized()
-        x0 = r.x0 * self.cell_px
-        y0 = r.y0 * self.cell_px
-        x1 = (r.x1 + 1) * self.cell_px
-        y1 = (r.y1 + 1) * self.cell_px
+        x0 = self._canvas_offset_x + (r.x0 * self.cell_px)
+        y0 = self._canvas_offset_y + (r.y0 * self.cell_px)
+        x1 = self._canvas_offset_x + ((r.x1 + 1) * self.cell_px)
+        y1 = self._canvas_offset_y + ((r.y1 + 1) * self.cell_px)
         self.canvas.create_rectangle(
             x0,
             y0,
@@ -1683,18 +1886,18 @@ class GuiBuilderApp:
         )
 
     def _draw_cell_fill(self, cx: int, cy: int, color: str) -> None:
-        x0 = cx * self.cell_px
-        y0 = cy * self.cell_px
+        x0 = self._canvas_offset_x + (cx * self.cell_px)
+        y0 = self._canvas_offset_y + (cy * self.cell_px)
         x1 = x0 + self.cell_px
         y1 = y0 + self.cell_px
         self.canvas.create_rectangle(x0, y0, x1, y1, fill=color, outline="")
 
     def _draw_rect_outline(self, rect: Rect, color: str) -> None:
         r = rect.normalized()
-        x0 = r.x0 * self.cell_px
-        y0 = r.y0 * self.cell_px
-        x1 = (r.x1 + 1) * self.cell_px
-        y1 = (r.y1 + 1) * self.cell_px
+        x0 = self._canvas_offset_x + (r.x0 * self.cell_px)
+        y0 = self._canvas_offset_y + (r.y0 * self.cell_px)
+        x1 = self._canvas_offset_x + ((r.x1 + 1) * self.cell_px)
+        y1 = self._canvas_offset_y + ((r.y1 + 1) * self.cell_px)
         self.canvas.create_rectangle(x0, y0, x1, y1, outline=color, width=2)
 
     def _draw_entry(self, ent: Entry) -> None:
@@ -1703,10 +1906,10 @@ class GuiBuilderApp:
             if self._draw_entry_textured(ent):
                 # Keep debug labels in preview (can be removed later if you want a clean look)
                 r = ent.rect.normalized()
-                x0 = r.x0 * self.cell_px
-                y0 = r.y0 * self.cell_px
-                x1 = (r.x1 + 1) * self.cell_px
-                y1 = (r.y1 + 1) * self.cell_px
+                x0 = self._canvas_offset_x + (r.x0 * self.cell_px)
+                y0 = self._canvas_offset_y + (r.y0 * self.cell_px)
+                x1 = self._canvas_offset_x + ((r.x1 + 1) * self.cell_px)
+                y1 = self._canvas_offset_y + ((r.y1 + 1) * self.cell_px)
 
                 label_lines: List[str] = []
                 if ent.tool in (Tool.TEXT_ENTRY, Tool.SELECT_LIST) and ent.label:
@@ -1738,10 +1941,10 @@ class GuiBuilderApp:
         fill = colors.get(ent.tool, "#666666")
 
         r = ent.rect.normalized()
-        x0 = r.x0 * self.cell_px
-        y0 = r.y0 * self.cell_px
-        x1 = (r.x1 + 1) * self.cell_px
-        y1 = (r.y1 + 1) * self.cell_px
+        x0 = self._canvas_offset_x + (r.x0 * self.cell_px)
+        y0 = self._canvas_offset_y + (r.y0 * self.cell_px)
+        x1 = self._canvas_offset_x + ((r.x1 + 1) * self.cell_px)
+        y1 = self._canvas_offset_y + ((r.y1 + 1) * self.cell_px)
 
         outline = "#111111"
         width = 1
@@ -1773,8 +1976,10 @@ class GuiBuilderApp:
     def _draw_grid_lines(self) -> None:
         for i in range(self.grid_n + 1):
             p = i * self.cell_px
-            self.canvas.create_line(p, 0, p, self.canvas_px, fill="#2a2a2a")
-            self.canvas.create_line(0, p, self.canvas_px, p, fill="#2a2a2a")
+            x = self._canvas_offset_x + p
+            y = self._canvas_offset_y + p
+            self.canvas.create_line(x, self._canvas_offset_y, x, self._canvas_offset_y + self.canvas_px, fill="#2a2a2a")
+            self.canvas.create_line(self._canvas_offset_x, y, self._canvas_offset_x + self.canvas_px, y, fill="#2a2a2a")
 
     def _draw_legend(self) -> None:
         mode = "PREVIEW" if self.preview_mode else "EDIT"

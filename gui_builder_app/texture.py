@@ -25,15 +25,35 @@ class TextureSheet:
         return self._rows
 
     def _scale_factors(self, cell_px: int) -> Tuple[int, int]:
-        """Return (zoom, subsample) factors so: tile_px * zoom / subsample == cell_px."""
-        # In this app, cell_px is always 40 (16x16 grid) or 20 (32x32 grid).
-        if cell_px == 40:
-            return 5, 2  # 16*5/2=40
-        if cell_px == 20:
-            return 5, 4  # 16*5/4=20
+        """Return (zoom, subsample) factors so: tile_px * zoom / subsample ~= cell_px.
 
-        # Fallback: keep native size (will look small) instead of crashing.
-        return 1, 1
+        Tk's PhotoImage only supports integer zoom/subsample, so we approximate.
+        """
+        if cell_px <= 0:
+            return 1, 1
+
+        tile_px = self.tile_px
+        if tile_px <= 0:
+            return 1, 1
+
+        # Search a small space of rational scale factors.
+        best_zoom, best_sub = 1, 1
+        best_err = abs(tile_px - cell_px)
+        best_complexity = best_zoom * best_sub
+
+        for sub in range(1, 65):
+            zoom = int(round((cell_px * sub) / tile_px))
+            if zoom < 1 or zoom > 64:
+                continue
+            scaled = (tile_px * zoom) / sub
+            err = abs(scaled - cell_px)
+            complexity = zoom * sub
+            if err < best_err - 1e-9 or (abs(err - best_err) <= 1e-9 and complexity < best_complexity):
+                best_zoom, best_sub = zoom, sub
+                best_err = err
+                best_complexity = complexity
+
+        return best_zoom, best_sub
 
     def get_tile(self, col: int, row: int, cell_px: int) -> Optional[tk.PhotoImage]:
         if col < 0 or row < 0 or col >= self._cols or row >= self._rows:

@@ -44,7 +44,7 @@ CTM_ORIGINS: Dict[str, Tuple[int, int]] = {
     "item_slot_hover": module_origin(3, 1),
     "input_border": module_origin(0, 2),
     "input_border_hover": module_origin(1, 2),
-    "background_border": module_origin(2, 0),
+    "background_border": module_origin(0, 2),
 }
 
 
