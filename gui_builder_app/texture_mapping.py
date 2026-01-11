@@ -44,11 +44,67 @@ CTM_DIRS: Tuple[Tuple[int, int, int], ...] = (
 def ctm_tile_offset(mask: int) -> Tuple[int, int]:
     """Map a 4-neighbor mask (0..15) into a 4x4 (dx,dy) tile offset.
 
-    Current mapping is row-major order:
-      (mask % 4, mask // 4)
+    This project uses a *structured* 4x4 layout per module (button, hover, etc):
 
-    If your atlas uses a different order (common in CTM sheets), change it here.
+    - (0,0): single-tile element
+    - Row 0 (y=0, x=1..3): horizontal-only elements
+        - (1,0): left cap   (E only)
+        - (2,0): middle     (E + W)
+        - (3,0): right cap  (W only)
+    - Col 0 (x=0, y=1..3): vertical-only elements
+        - (0,1): top cap    (S only)
+        - (0,2): middle     (N + S)
+        - (0,3): bottom cap (N only)
+    - 3x3 block (x=1..3, y=1..3): nine-slice for multi-wide multi-tall rectangles
+        arranged as:
+          (1,1) TL | (2,1) T  | (3,1) TR
+          (1,2) L  | (2,2) C  | (3,2) R
+          (1,3) BL | (2,3) B  | (3,3) BR
+
+    The input mask uses bits: N=1, E=2, S=4, W=8.
     """
 
     m = mask & 0xF
-    return (m % 4, m // 4)
+    n = bool(m & 0x1)
+    e = bool(m & 0x2)
+    s = bool(m & 0x4)
+    w = bool(m & 0x8)
+
+    # No neighbors -> single
+    if not (n or e or s or w):
+        return (0, 0)
+
+    # Pure horizontal strip (no vertical neighbors)
+    if not (n or s) and (e or w):
+        if e and w:
+            return (2, 0)
+        if e:
+            return (1, 0)
+        return (3, 0)  # w only
+
+    # Pure vertical strip (no horizontal neighbors)
+    if not (e or w) and (n or s):
+        if n and s:
+            return (0, 2)
+        if s:
+            return (0, 1)
+        return (0, 3)  # n only
+
+    # 2D nine-slice for rectangles
+    # X: left / middle / right
+    if w and e:
+        dx = 2
+    elif w:
+        dx = 3
+    else:
+        dx = 1
+
+    # Y: top / middle / bottom
+    if n and s:
+        dy = 2
+    elif n:
+        dy = 3
+    else:
+        dy = 1
+
+    return (dx, dy)
