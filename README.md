@@ -52,8 +52,12 @@ Edit `CTM_ORIGINS` in [gui_builder_app/texture_mapping.py](gui_builder_app/textu
 The values are **tile coordinates** (16×16 tiles), not pixels.
 
 Notable keys:
-- `input_border` / `input_border_hover`: used for `text_entry` and `select_list`
+- `text_entry_border` / `text_entry_border_hover`: used for `text_entry`
+- `select_list_border` / `select_list_border_hover`: used for `select_list`
 - `item_slot` / `item_slot_hover`: used for `item_slot`
+
+Compatibility:
+- `input_border` / `input_border_hover` are still present as legacy aliases, but the default tool mapping now uses the new per-tool keys above.
 
 Tool → module mapping:
 - `ENTRY_TOOL_MODULES` in [gui_builder_app/texture_mapping.py](gui_builder_app/texture_mapping.py) controls which module keys each tool uses (base/hover/pressed/etc).

@@ -416,6 +416,7 @@ class GuiBuilderApp:
         self.sel_hover_enabled_var = tk.BooleanVar(value=False)
         self.sel_hover_text_var = tk.StringVar(value="")
         self.sel_allow_hover_var = tk.BooleanVar(value=True)
+        self.sel_label_var = tk.StringVar(value="")
 
         def apply_selected_meta() -> None:
             ent = self.entries.get(self.selected_entry_id) if self.selected_entry_id is not None else None
@@ -428,6 +429,17 @@ class GuiBuilderApp:
                 "text": str(self.sel_hover_text_var.get()),
             }
             ent.meta = meta
+
+            # Displayed text/value is stored in ent.label for these tools.
+            if ent.tool in (
+                Tool.TEXT_SLOT,
+                Tool.TEXT_ENTRY,
+                Tool.SELECT_LIST,
+                Tool.BUTTON_STANDARD,
+                Tool.BUTTON_PRESS,
+                Tool.BUTTON_TOGGLE,
+            ):
+                ent.label = str(self.sel_label_var.get())
 
         tk.Checkbutton(
             self.selection_frame,
@@ -454,6 +466,23 @@ class GuiBuilderApp:
         sel_text_entry.pack(fill="x")
         sel_text_entry.bind("<KeyRelease>", lambda _e: apply_selected_meta())
         sel_text_entry.bind("<FocusOut>", lambda _e: apply_selected_meta())
+
+        # Displayed text/value editor (independent from hover text)
+        self.sel_label_frame = tk.Frame(self.selection_frame)
+        self.sel_label_frame.pack(fill="x", pady=(6, 0))
+
+        self.sel_label_title = tk.Label(self.sel_label_frame, text="Value/Text", font=("TkDefaultFont", 9, "bold"))
+        self.sel_label_title.pack(anchor="w")
+        self.sel_label_hint = tk.Label(self.sel_label_frame, text="", anchor="w", justify="left", wraplength=210)
+        self.sel_label_hint.pack(anchor="w")
+
+        sel_label_entry = tk.Entry(self.sel_label_frame, textvariable=self.sel_label_var)
+        sel_label_entry.pack(fill="x")
+        sel_label_entry.bind("<KeyRelease>", lambda _e: apply_selected_meta())
+        sel_label_entry.bind("<FocusOut>", lambda _e: apply_selected_meta())
+
+        # Hidden by default; shown only for tools that use ent.label.
+        self.sel_label_frame.pack_forget()
 
         # Button-specific metadata (for standard buttons)
         self.sel_button_meta_frame = tk.Frame(self.selection_frame)
@@ -737,6 +766,10 @@ class GuiBuilderApp:
             self.sel_hover_enabled_var.set(False)
             self.sel_hover_text_var.set("")
             self.sel_allow_hover_var.set(True)
+            if hasattr(self, "sel_label_var"):
+                self.sel_label_var.set("")
+            if hasattr(self, "sel_label_frame") and self.sel_label_frame.winfo_ismapped():
+                self.sel_label_frame.pack_forget()
             if hasattr(self, "sel_button_meta_frame") and self.sel_button_meta_frame.winfo_ismapped():
                 self.sel_button_meta_frame.pack_forget()
             return
@@ -756,6 +789,40 @@ class GuiBuilderApp:
             hover = {"enabled": False, "text": ""}
         self.sel_hover_enabled_var.set(bool(hover.get("enabled", False)))
         self.sel_hover_text_var.set(str(hover.get("text", "")))
+
+        # Show/hide displayed text/value editor depending on tool.
+        if hasattr(self, "sel_label_frame") and hasattr(self, "sel_label_title") and hasattr(self, "sel_label_hint"):
+            if ent.tool in (
+                Tool.TEXT_SLOT,
+                Tool.TEXT_ENTRY,
+                Tool.SELECT_LIST,
+                Tool.BUTTON_STANDARD,
+                Tool.BUTTON_PRESS,
+                Tool.BUTTON_TOGGLE,
+            ):
+                if not self.sel_label_frame.winfo_ismapped():
+                    if hasattr(self, "clear_selection_btn"):
+                        self.sel_label_frame.pack(fill="x", pady=(6, 0), before=self.clear_selection_btn)
+                    else:
+                        self.sel_label_frame.pack(fill="x", pady=(6, 0))
+
+                if ent.tool == Tool.TEXT_SLOT:
+                    self.sel_label_title.configure(text="Text Slot Text")
+                    self.sel_label_hint.configure(text="Shown inside the text slot. Independent from hover text.")
+                elif ent.tool == Tool.TEXT_ENTRY:
+                    self.sel_label_title.configure(text="Text Entry Value")
+                    self.sel_label_hint.configure(text="Current input value (preview/demo). Independent from hover text.")
+                elif ent.tool in (Tool.BUTTON_STANDARD, Tool.BUTTON_PRESS, Tool.BUTTON_TOGGLE):
+                    self.sel_label_title.configure(text="Button Text")
+                    self.sel_label_hint.configure(text="Shown on the button. Independent from hover text.")
+                else:
+                    self.sel_label_title.configure(text="Select List Value")
+                    self.sel_label_hint.configure(text="Currently selected item (preview/demo). Independent from hover text.")
+
+                self.sel_label_var.set(str(ent.label or ""))
+            else:
+                if self.sel_label_frame.winfo_ismapped():
+                    self.sel_label_frame.pack_forget()
 
         # Button options only apply to standard buttons.
         if hasattr(self, "sel_button_meta_frame"):
@@ -1020,7 +1087,7 @@ class GuiBuilderApp:
             self._popup_select_list(ent)
 
         elif ent.tool == Tool.TEXT_SLOT:
-            self.set_status(f"Preview: text slot {ent.entry_id} (no interaction)")
+            self.set_status(f"Preview: text slot {ent.entry_id} (display only)")
 
         elif ent.tool == Tool.ITEM_SLOT:
             self.set_status(f"Preview: item slot {ent.entry_id} (WIP)")
@@ -1912,10 +1979,18 @@ class GuiBuilderApp:
                 y1 = self._canvas_offset_y + ((r.y1 + 1) * self.cell_px)
 
                 label_lines: List[str] = []
-                if ent.tool in (Tool.TEXT_ENTRY, Tool.SELECT_LIST) and ent.label:
+                if ent.label and ent.tool in (
+                    Tool.TEXT_ENTRY,
+                    Tool.SELECT_LIST,
+                    Tool.TEXT_SLOT,
+                    Tool.BUTTON_STANDARD,
+                    Tool.BUTTON_PRESS,
+                    Tool.BUTTON_TOGGLE,
+                ):
                     label_lines.append(ent.label[:24])
 
                 if ent.tool == Tool.BUTTON_TOGGLE:
+                    # Keep state feedback for toggles.
                     label_lines.append("ON" if ent.active else "OFF")
 
                 if label_lines:
@@ -1955,8 +2030,12 @@ class GuiBuilderApp:
         self.canvas.create_rectangle(x0, y0, x1, y1, fill=fill, outline=outline, width=width)
 
         # Show tool name; also show label for text/select if any
-        label_lines = [ent.tool.value.replace("_", "\n")]
-        if ent.tool in (Tool.TEXT_ENTRY, Tool.SELECT_LIST) and ent.label:
+        if ent.tool in (Tool.BUTTON_STANDARD, Tool.BUTTON_PRESS, Tool.BUTTON_TOGGLE) and ent.label:
+            label_lines = [ent.label[:24]]
+        else:
+            label_lines = [ent.tool.value.replace("_", "\n")]
+
+        if ent.tool in (Tool.TEXT_ENTRY, Tool.SELECT_LIST, Tool.TEXT_SLOT) and ent.label:
             label_lines.append("---")
             label_lines.append(ent.label[:24])
 

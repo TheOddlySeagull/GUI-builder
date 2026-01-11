@@ -42,9 +42,11 @@ CTM_ORIGINS: Dict[str, Tuple[int, int]] = {
     "text_hover": module_origin(3, 0),
     "item_slot": module_origin(2, 1),
     "item_slot_hover": module_origin(3, 1),
-    "input_border": module_origin(0, 2),
-    "input_border_hover": module_origin(1, 2),
-    "background_border": module_origin(0, 2),
+    "text_entry_border": module_origin(0, 2),
+    "text_entry_border_hover": module_origin(1, 2),
+    "select_list_border": module_origin(2, 2),
+    "select_list_border_hover": module_origin(3, 2),
+    "background_border": module_origin(0, 3),
 }
 
 
@@ -74,12 +76,12 @@ ENTRY_TOOL_MODULES: Dict[Tool, Dict[str, str]] = {
         "hover": "text_hover",
     },
     Tool.TEXT_ENTRY: {
-        "base": "input_border",
-        "hover": "input_border_hover",
+        "base": "text_entry_border",
+        "hover": "text_entry_border_hover",
     },
     Tool.SELECT_LIST: {
-        "base": "input_border",
-        "hover": "input_border_hover",
+        "base": "select_list_border",
+        "hover": "select_list_border_hover",
     },
     Tool.ITEM_SLOT: {
         "base": "item_slot",
