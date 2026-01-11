@@ -15,34 +15,76 @@ from __future__ import annotations
 
 from typing import Dict, Tuple
 
+from .models import Tool
+
 TILE_PX = 16
 TEXTURE_SHEET_FILENAME = "GUI_CTM.png"
 BACKGROUND_TEXTURES_DIRNAME = "backgrounds"
+
+
+def module_origin(mx: int, my: int) -> Tuple[int, int]:
+    """Convert a *module* coordinate to a tile origin.
+
+    A module is a 4x4 CTM block, so module (mx,my) starts at tile (mx*4,my*4).
+    """
+
+    return (mx * 4, my * 4)
 
 # Connected texture layout assumptions (tile coordinates, NOT pixels).
 # Each state is expected to be a 4x4 CTM block, addressed by a 4-neighbor bitmask.
 CTM_ORIGINS: Dict[str, Tuple[int, int]] = {
     # Buttons (connected-texture)
-    "button_unpressed": (0, 0),
-    "button_hover": (4, 0),
-    "button_pressed": (0, 4),
-    "button_pressed_hover": (4, 4),
-    # Text areas / slots (connected-texture)
-    "text_unpressed": (8, 0),
-    "text_hover": (12, 0),
-    # Generic border (connected-texture) block.
-    # NOTE: This block is now used for item slots (and hovered item slots).
-    "item_slot": (8, 4),
-    # Default to same module unless you have a dedicated hover variant.
-    "item_slot_hover": (8, 4),
+    "button_unpressed": module_origin(0, 0),
+    "button_hover": module_origin(1, 0),
+    "button_pressed": module_origin(0, 1),
+    "button_pressed_hover": module_origin(1, 1),
+    "text_unpressed": module_origin(2, 0),
+    "text_hover": module_origin(3, 0),
+    "item_slot": module_origin(2, 1),
+    "item_slot_hover": module_origin(3, 1),
+    "input_border": module_origin(0, 2),
+    "input_border_hover": module_origin(1, 2),
+    "background_border": module_origin(2, 0),
+}
 
-    # Input fields (connected-texture) for select_list and text_entry.
-    # You said this was added *under the active button modules*; by default we assume
-    # it starts at (0,8) with a hover variant at (4,8). Adjust if needed.
-    "input_border": (0, 8),
-    "input_border_hover": (4, 8),
-    # Background border (connected-texture), expected to include transparency
-    "background_border": (12, 4),
+
+# For each entry tool, define which module keys to use.
+# Multiple keys are used when a tool has hover/pressed variants.
+ENTRY_TOOL_MODULES: Dict[Tool, Dict[str, str]] = {
+    Tool.BUTTON_STANDARD: {
+        "base": "button_unpressed",
+        "hover": "button_hover",
+        "pressed": "button_pressed",
+        "pressed_hover": "button_pressed_hover",
+    },
+    Tool.BUTTON_PRESS: {
+        "base": "button_unpressed",
+        "hover": "button_hover",
+        "pressed": "button_pressed",
+        "pressed_hover": "button_pressed_hover",
+    },
+    Tool.BUTTON_TOGGLE: {
+        "base": "button_unpressed",
+        "hover": "button_hover",
+        "pressed": "button_pressed",
+        "pressed_hover": "button_pressed_hover",
+    },
+    Tool.TEXT_SLOT: {
+        "base": "text_unpressed",
+        "hover": "text_hover",
+    },
+    Tool.TEXT_ENTRY: {
+        "base": "input_border",
+        "hover": "input_border_hover",
+    },
+    Tool.SELECT_LIST: {
+        "base": "input_border",
+        "hover": "input_border_hover",
+    },
+    Tool.ITEM_SLOT: {
+        "base": "item_slot",
+        "hover": "item_slot_hover",
+    },
 }
 
 # Bit order for CTM 4-neighbor connections.

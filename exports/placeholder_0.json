@@ -25,7 +25,12 @@
           },
           "active": false,
           "label": "",
-          "meta": {}
+          "meta": {
+            "hover": {
+              "enabled": false,
+              "text": "License"
+            }
+          }
         },
         {
           "id": 5,
@@ -51,7 +56,12 @@
           },
           "active": false,
           "label": "",
-          "meta": {}
+          "meta": {
+            "hover": {
+              "enabled": false,
+              "text": "Trin Gramados dealership"
+            }
+          }
         },
         {
           "id": 13,
@@ -172,7 +182,12 @@
           },
           "active": false,
           "label": "",
-          "meta": {}
+          "meta": {
+            "hover": {
+              "enabled": false,
+              "text": "Trin Gramados dealership"
+            }
+          }
         },
         {
           "id": 2,
@@ -185,7 +200,12 @@
           },
           "active": false,
           "label": "",
-          "meta": {}
+          "meta": {
+            "hover": {
+              "enabled": false,
+              "text": "Are you sure you want to purchase this vehicle?"
+            }
+          }
         },
         {
           "id": 8,

@@ -55,6 +55,9 @@ Notable keys:
 - `input_border` / `input_border_hover`: used for `text_entry` and `select_list`
 - `item_slot` / `item_slot_hover`: used for `item_slot`
 
+Tool → module mapping:
+- `ENTRY_TOOL_MODULES` in [gui_builder_app/texture_mapping.py](gui_builder_app/texture_mapping.py) controls which module keys each tool uses (base/hover/pressed/etc).
+
 2) **CTM variant ordering** (how the 4-neighbor mask maps to the 16 tiles)
 
 Edit `ctm_tile_offset(mask)` in [gui_builder_app/texture_mapping.py](gui_builder_app/texture_mapping.py).

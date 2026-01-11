@@ -13,6 +13,7 @@ from .texture_mapping import (
     BACKGROUND_TEXTURES_DIRNAME,
     CTM_DIRS,
     CTM_ORIGINS,
+    ENTRY_TOOL_MODULES,
     TEXTURE_SHEET_FILENAME,
     TILE_PX,
     ctm_tile_offset,
@@ -1376,13 +1377,12 @@ class GuiBuilderApp:
             return "button_unpressed"
 
         if ent.tool == Tool.TEXT_SLOT:
-            return "text_hover" if hovered else "text_unpressed"
+            mapping = ENTRY_TOOL_MODULES.get(ent.tool, {})
+            return mapping.get("hover" if hovered else "base", "")
 
-        if ent.tool in (Tool.TEXT_ENTRY, Tool.SELECT_LIST):
-            return "input_border_hover" if hovered else "input_border"
-
-        if ent.tool == Tool.ITEM_SLOT:
-            return "item_slot_hover" if hovered else "item_slot"
+        mapping = ENTRY_TOOL_MODULES.get(ent.tool)
+        if mapping:
+            return mapping.get("hover" if hovered else "base", "")
 
         # Everything else falls back to color rendering for now.
         return ""
