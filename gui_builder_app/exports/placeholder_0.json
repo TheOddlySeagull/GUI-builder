@@ -1,0 +1,239 @@
+{
+  "version": 3,
+  "grid_n": 16,
+  "start_page_id": 1,
+  "pages": [
+    {
+      "page_id": 1,
+      "background_rects": [
+        {
+          "x0": 1,
+          "y0": 1,
+          "x1": 12,
+          "y1": 9
+        }
+      ],
+      "entries": [
+        {
+          "id": 4,
+          "tool": "text_slot",
+          "rect": {
+            "x0": 6,
+            "y0": 8,
+            "x1": 11,
+            "y1": 8
+          },
+          "active": false,
+          "label": "",
+          "meta": {}
+        },
+        {
+          "id": 5,
+          "tool": "item_slot",
+          "rect": {
+            "x0": 2,
+            "y0": 4,
+            "x1": 4,
+            "y1": 6
+          },
+          "active": false,
+          "label": "",
+          "meta": {}
+        },
+        {
+          "id": 7,
+          "tool": "text_slot",
+          "rect": {
+            "x0": 2,
+            "y0": 2,
+            "x1": 11,
+            "y1": 2
+          },
+          "active": false,
+          "label": "",
+          "meta": {}
+        },
+        {
+          "id": 13,
+          "tool": "button_toggle",
+          "rect": {
+            "x0": 5,
+            "y0": 8,
+            "x1": 5,
+            "y1": 8
+          },
+          "active": false,
+          "label": "",
+          "meta": {}
+        },
+        {
+          "id": 19,
+          "tool": "text_slot",
+          "rect": {
+            "x0": 5,
+            "y0": 4,
+            "x1": 11,
+            "y1": 5
+          },
+          "active": false,
+          "label": "",
+          "meta": {}
+        },
+        {
+          "id": 23,
+          "tool": "button_standard",
+          "rect": {
+            "x0": 2,
+            "y0": 8,
+            "x1": 2,
+            "y1": 8
+          },
+          "active": false,
+          "label": "",
+          "meta": {
+            "page_change": {
+              "mode": "none",
+              "target_page_id": 1,
+              "modulo": false
+            },
+            "hover": {
+              "enabled": true,
+              "text": "Other Model"
+            }
+          }
+        },
+        {
+          "id": 24,
+          "tool": "button_standard",
+          "rect": {
+            "x0": 3,
+            "y0": 8,
+            "x1": 3,
+            "y1": 8
+          },
+          "active": false,
+          "label": "",
+          "meta": {
+            "page_change": {
+              "mode": "none",
+              "target_page_id": 1,
+              "modulo": false
+            },
+            "hover": {
+              "enabled": true,
+              "text": "Other Model"
+            }
+          }
+        },
+        {
+          "id": 25,
+          "tool": "button_standard",
+          "rect": {
+            "x0": 5,
+            "y0": 6,
+            "x1": 11,
+            "y1": 6
+          },
+          "active": false,
+          "label": "",
+          "meta": {
+            "page_change": {
+              "mode": "goto",
+              "target_page_id": 2,
+              "modulo": false
+            },
+            "hover": {
+              "enabled": true,
+              "text": "Purchase"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "page_id": 2,
+      "background_rects": [
+        {
+          "x0": 1,
+          "y0": 1,
+          "x1": 12,
+          "y1": 9
+        }
+      ],
+      "entries": [
+        {
+          "id": 1,
+          "tool": "text_slot",
+          "rect": {
+            "x0": 2,
+            "y0": 2,
+            "x1": 11,
+            "y1": 2
+          },
+          "active": false,
+          "label": "",
+          "meta": {}
+        },
+        {
+          "id": 2,
+          "tool": "text_slot",
+          "rect": {
+            "x0": 2,
+            "y0": 4,
+            "x1": 11,
+            "y1": 6
+          },
+          "active": false,
+          "label": "",
+          "meta": {}
+        },
+        {
+          "id": 8,
+          "tool": "button_standard",
+          "rect": {
+            "x0": 4,
+            "y0": 8,
+            "x1": 11,
+            "y1": 8
+          },
+          "active": false,
+          "label": "",
+          "meta": {
+            "page_change": {
+              "mode": "none",
+              "target_page_id": 2,
+              "modulo": false
+            },
+            "hover": {
+              "enabled": true,
+              "text": "Confirm"
+            }
+          }
+        },
+        {
+          "id": 9,
+          "tool": "button_standard",
+          "rect": {
+            "x0": 2,
+            "y0": 8,
+            "x1": 2,
+            "y1": 8
+          },
+          "active": false,
+          "label": "",
+          "meta": {
+            "page_change": {
+              "mode": "goto",
+              "target_page_id": 1,
+              "modulo": false
+            },
+            "hover": {
+              "enabled": true,
+              "text": "Back"
+            }
+          }
+        }
+      ]
+    }
+  ]
+}
