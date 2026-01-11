@@ -17,8 +17,6 @@ class Tool(str, Enum):
 
 
 SQUARE_ONLY = {
-    Tool.TEXT_ENTRY,
-    Tool.SELECT_LIST,
     Tool.ITEM_SLOT,
 }
 

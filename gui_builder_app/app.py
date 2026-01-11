@@ -489,7 +489,7 @@ class GuiBuilderApp:
                 "  Left click/drag to place/remove\n"
                 "PREVIEW MODE:\n"
                 "  Interact with buttons, open text/select popups\n"
-                "Square tools: text_entry, select_list, item_slot\n"
+                "Square tools: item_slot\\n"
                 "File -> Save/Load JSON"
             ),
             anchor="w",
