@@ -1,0 +1,1146 @@
+{
+  "version": 3,
+  "grid_n": 32,
+  "start_page_id": 1,
+  "pages": [
+    {
+      "page_id": 1,
+      "background_rects": [
+        {
+          "x0": 0,
+          "y0": 0,
+          "x1": 31,
+          "y1": 21
+        }
+      ],
+      "entries": [
+        {
+          "id": 2,
+          "tool": "button_press",
+          "rect": {
+            "x0": 9,
+            "y0": 1,
+            "x1": 16,
+            "y1": 4
+          },
+          "active": false,
+          "label": "",
+          "meta": {
+            "allow_hover": true,
+            "hover": {
+              "enabled": false,
+              "text": ""
+            }
+          }
+        },
+        {
+          "id": 3,
+          "tool": "button_toggle",
+          "rect": {
+            "x0": 18,
+            "y0": 1,
+            "x1": 30,
+            "y1": 4
+          },
+          "active": false,
+          "label": "",
+          "meta": {
+            "allow_hover": true,
+            "hover": {
+              "enabled": false,
+              "text": ""
+            }
+          }
+        },
+        {
+          "id": 4,
+          "tool": "text_entry",
+          "rect": {
+            "x0": 2,
+            "y0": 6,
+            "x1": 16,
+            "y1": 9
+          },
+          "active": false,
+          "label": "hdhcxzefcby zuytfgvuyncrf zcx rvyutachpuyr cz ckguvatbouar eyv ,ti",
+          "meta": {
+            "allow_hover": false,
+            "hover": {
+              "enabled": false,
+              "text": ""
+            }
+          }
+        },
+        {
+          "id": 5,
+          "tool": "select_list",
+          "rect": {
+            "x0": 18,
+            "y0": 6,
+            "x1": 30,
+            "y1": 20
+          },
+          "active": false,
+          "label": "Zeta",
+          "meta": {
+            "allow_hover": true,
+            "hover": {
+              "enabled": false,
+              "text": ""
+            }
+          }
+        },
+        {
+          "id": 7,
+          "tool": "text_slot",
+          "rect": {
+            "x0": 2,
+            "y0": 11,
+            "x1": 16,
+            "y1": 16
+          },
+          "active": false,
+          "label": "",
+          "meta": {
+            "allow_hover": false,
+            "hover": {
+              "enabled": false,
+              "text": ""
+            }
+          }
+        },
+        {
+          "id": 9,
+          "tool": "item_slot",
+          "rect": {
+            "x0": 2,
+            "y0": 18,
+            "x1": 4,
+            "y1": 20
+          },
+          "active": false,
+          "label": "",
+          "meta": {
+            "allow_hover": true,
+            "hover": {
+              "enabled": false,
+              "text": ""
+            }
+          }
+        },
+        {
+          "id": 10,
+          "tool": "item_slot",
+          "rect": {
+            "x0": 6,
+            "y0": 18,
+            "x1": 8,
+            "y1": 20
+          },
+          "active": false,
+          "label": "",
+          "meta": {
+            "allow_hover": true,
+            "hover": {
+              "enabled": true,
+              "text": "Item Slot"
+            }
+          }
+        },
+        {
+          "id": 11,
+          "tool": "item_slot",
+          "rect": {
+            "x0": 10,
+            "y0": 18,
+            "x1": 12,
+            "y1": 20
+          },
+          "active": false,
+          "label": "",
+          "meta": {
+            "allow_hover": true,
+            "hover": {
+              "enabled": false,
+              "text": "Item Slot"
+            }
+          }
+        },
+        {
+          "id": 12,
+          "tool": "item_slot",
+          "rect": {
+            "x0": 14,
+            "y0": 18,
+            "x1": 16,
+            "y1": 20
+          },
+          "active": false,
+          "label": "",
+          "meta": {
+            "allow_hover": false,
+            "hover": {
+              "enabled": true,
+              "text": "Item Slot"
+            }
+          }
+        },
+        {
+          "id": 13,
+          "tool": "button_standard",
+          "rect": {
+            "x0": 5,
+            "y0": 1,
+            "x1": 7,
+            "y1": 4
+          },
+          "active": false,
+          "label": "Next Page",
+          "meta": {
+            "page_change": {
+              "mode": "next",
+              "target_page_id": 1,
+              "modulo": true
+            },
+            "allow_hover": true,
+            "hover": {
+              "enabled": true,
+              "text": "next"
+            }
+          }
+        },
+        {
+          "id": 14,
+          "tool": "button_standard",
+          "rect": {
+            "x0": 2,
+            "y0": 1,
+            "x1": 4,
+            "y1": 4
+          },
+          "active": false,
+          "label": "Previous Page",
+          "meta": {
+            "page_change": {
+              "mode": "prev",
+              "target_page_id": 1,
+              "modulo": true
+            },
+            "allow_hover": true,
+            "hover": {
+              "enabled": true,
+              "text": "prev"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "page_id": 2,
+      "background_rects": [
+        {
+          "x0": 0,
+          "y0": 0,
+          "x1": 31,
+          "y1": 0
+        },
+        {
+          "x0": 0,
+          "y0": 1,
+          "x1": 6,
+          "y1": 21
+        },
+        {
+          "x0": 12,
+          "y0": 1,
+          "x1": 31,
+          "y1": 8
+        },
+        {
+          "x0": 12,
+          "y0": 9,
+          "x1": 18,
+          "y1": 9
+        },
+        {
+          "x0": 23,
+          "y0": 9,
+          "x1": 31,
+          "y1": 9
+        },
+        {
+          "x0": 12,
+          "y0": 10,
+          "x1": 16,
+          "y1": 10
+        },
+        {
+          "x0": 19,
+          "y0": 10,
+          "x1": 22,
+          "y1": 14
+        },
+        {
+          "x0": 25,
+          "y0": 10,
+          "x1": 31,
+          "y1": 10
+        },
+        {
+          "x0": 12,
+          "y0": 11,
+          "x1": 15,
+          "y1": 11
+        },
+        {
+          "x0": 17,
+          "y0": 11,
+          "x1": 18,
+          "y1": 11
+        },
+        {
+          "x0": 23,
+          "y0": 11,
+          "x1": 24,
+          "y1": 11
+        },
+        {
+          "x0": 26,
+          "y0": 11,
+          "x1": 31,
+          "y1": 11
+        },
+        {
+          "x0": 12,
+          "y0": 12,
+          "x1": 14,
+          "y1": 13
+        },
+        {
+          "x0": 16,
+          "y0": 12,
+          "x1": 17,
+          "y1": 16
+        },
+        {
+          "x0": 24,
+          "y0": 12,
+          "x1": 25,
+          "y1": 16
+        },
+        {
+          "x0": 27,
+          "y0": 12,
+          "x1": 31,
+          "y1": 13
+        },
+        {
+          "x0": 12,
+          "y0": 14,
+          "x1": 13,
+          "y1": 21
+        },
+        {
+          "x0": 15,
+          "y0": 14,
+          "x1": 15,
+          "y1": 18
+        },
+        {
+          "x0": 26,
+          "y0": 14,
+          "x1": 26,
+          "y1": 18
+        },
+        {
+          "x0": 28,
+          "y0": 14,
+          "x1": 31,
+          "y1": 21
+        },
+        {
+          "x0": 18,
+          "y0": 15,
+          "x1": 19,
+          "y1": 17
+        },
+        {
+          "x0": 22,
+          "y0": 15,
+          "x1": 23,
+          "y1": 17
+        },
+        {
+          "x0": 16,
+          "y0": 17,
+          "x1": 16,
+          "y1": 19
+        },
+        {
+          "x0": 20,
+          "y0": 17,
+          "x1": 21,
+          "y1": 17
+        },
+        {
+          "x0": 25,
+          "y0": 17,
+          "x1": 25,
+          "y1": 19
+        },
+        {
+          "x0": 17,
+          "y0": 18,
+          "x1": 17,
+          "y1": 19
+        },
+        {
+          "x0": 24,
+          "y0": 18,
+          "x1": 24,
+          "y1": 19
+        },
+        {
+          "x0": 14,
+          "y0": 19,
+          "x1": 14,
+          "y1": 21
+        },
+        {
+          "x0": 18,
+          "y0": 19,
+          "x1": 23,
+          "y1": 19
+        },
+        {
+          "x0": 27,
+          "y0": 19,
+          "x1": 27,
+          "y1": 21
+        },
+        {
+          "x0": 15,
+          "y0": 20,
+          "x1": 15,
+          "y1": 21
+        },
+        {
+          "x0": 26,
+          "y0": 20,
+          "x1": 26,
+          "y1": 21
+        },
+        {
+          "x0": 7,
+          "y0": 21,
+          "x1": 11,
+          "y1": 21
+        },
+        {
+          "x0": 16,
+          "y0": 21,
+          "x1": 25,
+          "y1": 21
+        }
+      ],
+      "entries": [
+        {
+          "id": 4,
+          "tool": "item_slot",
+          "rect": {
+            "x0": 13,
+            "y0": 1,
+            "x1": 13,
+            "y1": 1
+          },
+          "active": false,
+          "label": "",
+          "meta": {
+            "allow_hover": false,
+            "hover": {
+              "enabled": false,
+              "text": ""
+            }
+          }
+        },
+        {
+          "id": 5,
+          "tool": "item_slot",
+          "rect": {
+            "x0": 15,
+            "y0": 1,
+            "x1": 16,
+            "y1": 2
+          },
+          "active": false,
+          "label": "",
+          "meta": {
+            "allow_hover": false,
+            "hover": {
+              "enabled": false,
+              "text": ""
+            }
+          }
+        },
+        {
+          "id": 6,
+          "tool": "item_slot",
+          "rect": {
+            "x0": 18,
+            "y0": 1,
+            "x1": 20,
+            "y1": 3
+          },
+          "active": false,
+          "label": "",
+          "meta": {
+            "allow_hover": false,
+            "hover": {
+              "enabled": false,
+              "text": ""
+            }
+          }
+        },
+        {
+          "id": 7,
+          "tool": "item_slot",
+          "rect": {
+            "x0": 22,
+            "y0": 1,
+            "x1": 25,
+            "y1": 4
+          },
+          "active": false,
+          "label": "",
+          "meta": {
+            "allow_hover": false,
+            "hover": {
+              "enabled": false,
+              "text": ""
+            }
+          }
+        },
+        {
+          "id": 8,
+          "tool": "text_entry",
+          "rect": {
+            "x0": 13,
+            "y0": 4,
+            "x1": 16,
+            "y1": 4
+          },
+          "active": false,
+          "label": "this is an entered text",
+          "meta": {
+            "allow_hover": true,
+            "hover": {
+              "enabled": false,
+              "text": ""
+            }
+          }
+        },
+        {
+          "id": 9,
+          "tool": "text_entry",
+          "rect": {
+            "x0": 13,
+            "y0": 5,
+            "x1": 16,
+            "y1": 5
+          },
+          "active": false,
+          "label": "",
+          "meta": {
+            "allow_hover": true,
+            "hover": {
+              "enabled": false,
+              "text": ""
+            }
+          }
+        },
+        {
+          "id": 10,
+          "tool": "text_entry",
+          "rect": {
+            "x0": 13,
+            "y0": 6,
+            "x1": 16,
+            "y1": 6
+          },
+          "active": false,
+          "label": "",
+          "meta": {
+            "allow_hover": true,
+            "hover": {
+              "enabled": false,
+              "text": ""
+            }
+          }
+        },
+        {
+          "id": 11,
+          "tool": "button_standard",
+          "rect": {
+            "x0": 13,
+            "y0": 7,
+            "x1": 14,
+            "y1": 7
+          },
+          "active": false,
+          "label": "",
+          "meta": {
+            "page_change": {
+              "mode": "none",
+              "target_page_id": 1,
+              "modulo": true
+            },
+            "allow_hover": true,
+            "hover": {
+              "enabled": false,
+              "text": ""
+            }
+          }
+        },
+        {
+          "id": 12,
+          "tool": "button_standard",
+          "rect": {
+            "x0": 13,
+            "y0": 8,
+            "x1": 13,
+            "y1": 8
+          },
+          "active": false,
+          "label": "",
+          "meta": {
+            "page_change": {
+              "mode": "none",
+              "target_page_id": 1,
+              "modulo": true
+            },
+            "allow_hover": true,
+            "hover": {
+              "enabled": false,
+              "text": ""
+            }
+          }
+        },
+        {
+          "id": 13,
+          "tool": "button_standard",
+          "rect": {
+            "x0": 15,
+            "y0": 7,
+            "x1": 16,
+            "y1": 8
+          },
+          "active": false,
+          "label": "",
+          "meta": {
+            "page_change": {
+              "mode": "none",
+              "target_page_id": 1,
+              "modulo": true
+            },
+            "allow_hover": true,
+            "hover": {
+              "enabled": false,
+              "text": ""
+            }
+          }
+        },
+        {
+          "id": 14,
+          "tool": "button_standard",
+          "rect": {
+            "x0": 17,
+            "y0": 5,
+            "x1": 17,
+            "y1": 7
+          },
+          "active": false,
+          "label": "",
+          "meta": {
+            "page_change": {
+              "mode": "none",
+              "target_page_id": 1,
+              "modulo": true
+            },
+            "allow_hover": true,
+            "hover": {
+              "enabled": false,
+              "text": ""
+            }
+          }
+        },
+        {
+          "id": 15,
+          "tool": "button_standard",
+          "rect": {
+            "x0": 18,
+            "y0": 5,
+            "x1": 19,
+            "y1": 7
+          },
+          "active": false,
+          "label": "",
+          "meta": {
+            "page_change": {
+              "mode": "none",
+              "target_page_id": 1,
+              "modulo": true
+            },
+            "allow_hover": true,
+            "hover": {
+              "enabled": false,
+              "text": ""
+            }
+          }
+        },
+        {
+          "id": 16,
+          "tool": "button_standard",
+          "rect": {
+            "x0": 20,
+            "y0": 5,
+            "x1": 20,
+            "y1": 7
+          },
+          "active": false,
+          "label": "",
+          "meta": {
+            "page_change": {
+              "mode": "none",
+              "target_page_id": 1,
+              "modulo": true
+            },
+            "allow_hover": true,
+            "hover": {
+              "enabled": false,
+              "text": ""
+            }
+          }
+        },
+        {
+          "id": 17,
+          "tool": "button_standard",
+          "rect": {
+            "x0": 21,
+            "y0": 5,
+            "x1": 21,
+            "y1": 6
+          },
+          "active": false,
+          "label": "",
+          "meta": {
+            "page_change": {
+              "mode": "none",
+              "target_page_id": 1,
+              "modulo": true
+            },
+            "allow_hover": true,
+            "hover": {
+              "enabled": false,
+              "text": ""
+            }
+          }
+        },
+        {
+          "id": 18,
+          "tool": "button_standard",
+          "rect": {
+            "x0": 21,
+            "y0": 7,
+            "x1": 21,
+            "y1": 7
+          },
+          "active": false,
+          "label": "",
+          "meta": {
+            "page_change": {
+              "mode": "none",
+              "target_page_id": 1,
+              "modulo": true
+            },
+            "allow_hover": true,
+            "hover": {
+              "enabled": false,
+              "text": ""
+            }
+          }
+        },
+        {
+          "id": 22,
+          "tool": "button_toggle",
+          "rect": {
+            "x0": 22,
+            "y0": 5,
+            "x1": 30,
+            "y1": 7
+          },
+          "active": false,
+          "label": "",
+          "meta": {
+            "allow_hover": true,
+            "hover": {
+              "enabled": false,
+              "text": ""
+            }
+          }
+        },
+        {
+          "id": 23,
+          "tool": "button_toggle",
+          "rect": {
+            "x0": 26,
+            "y0": 1,
+            "x1": 30,
+            "y1": 4
+          },
+          "active": false,
+          "label": "",
+          "meta": {
+            "allow_hover": true,
+            "hover": {
+              "enabled": false,
+              "text": ""
+            }
+          }
+        },
+        {
+          "id": 24,
+          "tool": "button_toggle",
+          "rect": {
+            "x0": 21,
+            "y0": 1,
+            "x1": 21,
+            "y1": 4
+          },
+          "active": false,
+          "label": "",
+          "meta": {
+            "allow_hover": true,
+            "hover": {
+              "enabled": false,
+              "text": ""
+            }
+          }
+        },
+        {
+          "id": 25,
+          "tool": "button_toggle",
+          "rect": {
+            "x0": 18,
+            "y0": 4,
+            "x1": 20,
+            "y1": 4
+          },
+          "active": false,
+          "label": "",
+          "meta": {
+            "allow_hover": true,
+            "hover": {
+              "enabled": false,
+              "text": ""
+            }
+          }
+        },
+        {
+          "id": 26,
+          "tool": "button_toggle",
+          "rect": {
+            "x0": 17,
+            "y0": 3,
+            "x1": 17,
+            "y1": 4
+          },
+          "active": false,
+          "label": "",
+          "meta": {
+            "allow_hover": true,
+            "hover": {
+              "enabled": false,
+              "text": ""
+            }
+          }
+        },
+        {
+          "id": 27,
+          "tool": "button_toggle",
+          "rect": {
+            "x0": 17,
+            "y0": 1,
+            "x1": 17,
+            "y1": 2
+          },
+          "active": false,
+          "label": "",
+          "meta": {
+            "allow_hover": true,
+            "hover": {
+              "enabled": false,
+              "text": ""
+            }
+          }
+        },
+        {
+          "id": 28,
+          "tool": "button_toggle",
+          "rect": {
+            "x0": 16,
+            "y0": 3,
+            "x1": 16,
+            "y1": 3
+          },
+          "active": false,
+          "label": "",
+          "meta": {
+            "allow_hover": true,
+            "hover": {
+              "enabled": false,
+              "text": ""
+            }
+          }
+        },
+        {
+          "id": 29,
+          "tool": "button_toggle",
+          "rect": {
+            "x0": 15,
+            "y0": 3,
+            "x1": 15,
+            "y1": 3
+          },
+          "active": false,
+          "label": "",
+          "meta": {
+            "allow_hover": true,
+            "hover": {
+              "enabled": false,
+              "text": ""
+            }
+          }
+        },
+        {
+          "id": 30,
+          "tool": "button_toggle",
+          "rect": {
+            "x0": 14,
+            "y0": 1,
+            "x1": 14,
+            "y1": 3
+          },
+          "active": false,
+          "label": "",
+          "meta": {
+            "allow_hover": true,
+            "hover": {
+              "enabled": false,
+              "text": ""
+            }
+          }
+        },
+        {
+          "id": 31,
+          "tool": "button_toggle",
+          "rect": {
+            "x0": 13,
+            "y0": 2,
+            "x1": 13,
+            "y1": 3
+          },
+          "active": false,
+          "label": "",
+          "meta": {
+            "allow_hover": true,
+            "hover": {
+              "enabled": false,
+              "text": ""
+            }
+          }
+        },
+        {
+          "id": 32,
+          "tool": "button_toggle",
+          "rect": {
+            "x0": 14,
+            "y0": 8,
+            "x1": 14,
+            "y1": 8
+          },
+          "active": false,
+          "label": "",
+          "meta": {
+            "allow_hover": true,
+            "hover": {
+              "enabled": false,
+              "text": ""
+            }
+          }
+        },
+        {
+          "id": 33,
+          "tool": "button_toggle",
+          "rect": {
+            "x0": 8,
+            "y0": 2,
+            "x1": 10,
+            "y1": 3
+          },
+          "active": false,
+          "label": "",
+          "meta": {
+            "allow_hover": true,
+            "hover": {
+              "enabled": false,
+              "text": ""
+            }
+          }
+        },
+        {
+          "id": 34,
+          "tool": "button_toggle",
+          "rect": {
+            "x0": 10,
+            "y0": 4,
+            "x1": 10,
+            "y1": 4
+          },
+          "active": false,
+          "label": "",
+          "meta": {
+            "allow_hover": true,
+            "hover": {
+              "enabled": false,
+              "text": ""
+            }
+          }
+        },
+        {
+          "id": 35,
+          "tool": "button_toggle",
+          "rect": {
+            "x0": 9,
+            "y0": 4,
+            "x1": 9,
+            "y1": 4
+          },
+          "active": false,
+          "label": "",
+          "meta": {
+            "allow_hover": true,
+            "hover": {
+              "enabled": false,
+              "text": ""
+            }
+          }
+        },
+        {
+          "id": 36,
+          "tool": "button_toggle",
+          "rect": {
+            "x0": 8,
+            "y0": 4,
+            "x1": 8,
+            "y1": 4
+          },
+          "active": false,
+          "label": "",
+          "meta": {
+            "allow_hover": true,
+            "hover": {
+              "enabled": false,
+              "text": ""
+            }
+          }
+        },
+        {
+          "id": 37,
+          "tool": "select_list",
+          "rect": {
+            "x0": 1,
+            "y0": 3,
+            "x1": 4,
+            "y1": 10
+          },
+          "active": false,
+          "label": "",
+          "meta": {
+            "allow_hover": true,
+            "hover": {
+              "enabled": false,
+              "text": ""
+            }
+          }
+        },
+        {
+          "id": 38,
+          "tool": "text_slot",
+          "rect": {
+            "x0": 1,
+            "y0": 11,
+            "x1": 4,
+            "y1": 18
+          },
+          "active": false,
+          "label": "This is an example text",
+          "meta": {
+            "allow_hover": true,
+            "hover": {
+              "enabled": false,
+              "text": ""
+            }
+          }
+        },
+        {
+          "id": 39,
+          "tool": "button_standard",
+          "rect": {
+            "x0": 1,
+            "y0": 1,
+            "x1": 4,
+            "y1": 2
+          },
+          "active": false,
+          "label": "Prev",
+          "meta": {
+            "page_change": {
+              "mode": "prev",
+              "target_page_id": 1,
+              "modulo": true
+            },
+            "allow_hover": true,
+            "hover": {
+              "enabled": true,
+              "text": "prev"
+            }
+          }
+        },
+        {
+          "id": 40,
+          "tool": "button_standard",
+          "rect": {
+            "x0": 1,
+            "y0": 19,
+            "x1": 4,
+            "y1": 20
+          },
+          "active": false,
+          "label": "Next",
+          "meta": {
+            "page_change": {
+              "mode": "next",
+              "target_page_id": 1,
+              "modulo": true
+            },
+            "allow_hover": true,
+            "hover": {
+              "enabled": true,
+              "text": "next"
+            }
+          }
+        }
+      ]
+    }
+  ]
+}
