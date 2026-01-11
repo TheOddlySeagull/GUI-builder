@@ -1379,8 +1379,10 @@ class GuiBuilderApp:
             return "text_hover" if hovered else "text_unpressed"
 
         if ent.tool in (Tool.TEXT_ENTRY, Tool.SELECT_LIST):
-            # Uses the dedicated generic border module (usually transparent inside).
-            return "generic_border"
+            return "input_border_hover" if hovered else "input_border"
+
+        if ent.tool == Tool.ITEM_SLOT:
+            return "item_slot_hover" if hovered else "item_slot"
 
         # Everything else falls back to color rendering for now.
         return ""

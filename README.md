@@ -51,6 +51,10 @@ Things you will typically tweak:
 Edit `CTM_ORIGINS` in [gui_builder_app/texture_mapping.py](gui_builder_app/texture_mapping.py).
 The values are **tile coordinates** (16×16 tiles), not pixels.
 
+Notable keys:
+- `input_border` / `input_border_hover`: used for `text_entry` and `select_list`
+- `item_slot` / `item_slot_hover`: used for `item_slot`
+
 2) **CTM variant ordering** (how the 4-neighbor mask maps to the 16 tiles)
 
 Edit `ctm_tile_offset(mask)` in [gui_builder_app/texture_mapping.py](gui_builder_app/texture_mapping.py).

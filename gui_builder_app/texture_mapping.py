@@ -30,8 +30,17 @@ CTM_ORIGINS: Dict[str, Tuple[int, int]] = {
     # Text areas / slots (connected-texture)
     "text_unpressed": (8, 0),
     "text_hover": (12, 0),
-    # Generic border (connected-texture) for select_list and text_entry
-    "generic_border": (8, 4),
+    # Generic border (connected-texture) block.
+    # NOTE: This block is now used for item slots (and hovered item slots).
+    "item_slot": (8, 4),
+    # Default to same module unless you have a dedicated hover variant.
+    "item_slot_hover": (8, 4),
+
+    # Input fields (connected-texture) for select_list and text_entry.
+    # You said this was added *under the active button modules*; by default we assume
+    # it starts at (0,8) with a hover variant at (4,8). Adjust if needed.
+    "input_border": (0, 8),
+    "input_border_hover": (4, 8),
     # Background border (connected-texture), expected to include transparency
     "background_border": (12, 4),
 }
