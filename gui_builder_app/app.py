@@ -1422,14 +1422,9 @@ class GuiBuilderApp:
         for ent in self.entries.values():
             self._draw_entry(ent)
 
-        # Preview hover highlight overlay
-        if self.preview_mode and self._preview_hover_entry_id is not None:
-            hent = self.entries.get(self._preview_hover_entry_id)
-            if hent is not None:
-                self._draw_hover_outline(hent)
-
-        # Grid overlay
-        self._draw_grid_lines()
+        # Grid overlay (editor only). Preview should show only the textured tiles.
+        if not self.preview_mode:
+            self._draw_grid_lines()
 
         # Editor drag preview
         if (not self.preview_mode) and self._dragging and self._drag_start and self._drag_end:
