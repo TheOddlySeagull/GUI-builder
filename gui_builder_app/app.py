@@ -9,7 +9,14 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from .models import Entry, PageState, Rect, SQUARE_ONLY, Tool
 from .texture import TextureSheet
-from .texture_mapping import CTM_DIRS, CTM_ORIGINS, TEXTURE_SHEET_FILENAME, TILE_PX, ctm_tile_offset
+from .texture_mapping import (
+    BACKGROUND_TEXTURES_DIRNAME,
+    CTM_DIRS,
+    CTM_ORIGINS,
+    TEXTURE_SHEET_FILENAME,
+    TILE_PX,
+    ctm_tile_offset,
+)
 
 
 class GuiBuilderApp:
@@ -54,6 +61,14 @@ class GuiBuilderApp:
         # Preview hover state
         self._preview_hover_entry_id: Optional[int] = None
 
+        # Preview background texture selection (optional)
+        self._background_texture_paths: Dict[str, str] = {}
+        self._background_texture_name: str = "(none)"
+        self._background_texture_src: Optional[tk.PhotoImage] = None
+        self._background_texture_scaled: Dict[int, tk.PhotoImage] = {}
+        self._preview_background_image: Optional[tk.PhotoImage] = None
+        self._preview_background_cache_key: Optional[Tuple[int, int, int, str, str]] = None
+
         # Tool-level metadata (applies to newly placed entries while tool is selected)
         self.standard_button_tool_meta: Dict[str, Any] = {
             "page_change": {
@@ -78,6 +93,7 @@ class GuiBuilderApp:
 
         # Load texture sheet after Tk is initialized.
         self._load_texture_sheet()
+        self._scan_background_textures()
         self.redraw()
 
     # ----------------------------
@@ -435,6 +451,13 @@ class GuiBuilderApp:
         tk.Label(left, text="Grid", font=("TkDefaultFont", 10, "bold")).pack(anchor="w")
         self.grid_btn = tk.Button(left, text="Toggle 16×16 / 32×32", command=self.toggle_grid)
         self.grid_btn.pack(fill="x")
+
+        tk.Label(left, text="Background (preview)", font=("TkDefaultFont", 10, "bold")).pack(anchor="w", pady=(8, 0))
+        self.bg_texture_var = tk.StringVar(value="(none)")
+        self.bg_texture_menu = tk.OptionMenu(left, self.bg_texture_var, "(none)", command=self._on_background_texture_changed)
+        self.bg_texture_menu.pack(fill="x")
+
+        tk.Button(left, text="Rescan backgrounds", command=self._scan_background_textures).pack(fill="x", pady=(4, 0))
 
         self.preview_btn = tk.Button(left, text="Preview: OFF", command=self.toggle_preview)
         self.preview_btn.pack(fill="x", pady=(6, 0))
@@ -1143,6 +1166,174 @@ class GuiBuilderApp:
         base_dir = os.path.dirname(os.path.abspath(sys.argv[0])) if sys.argv and sys.argv[0] else os.getcwd()
         return os.path.join(base_dir, TEXTURE_SHEET_FILENAME)
 
+    def _background_textures_dir(self) -> str:
+        return os.path.join(os.path.dirname(self._texture_sheet_path()), BACKGROUND_TEXTURES_DIRNAME)
+
+    def _scan_background_textures(self) -> None:
+        """Detect background textures from the backgrounds folder next to GUI_CTM.png."""
+        has_ui = hasattr(self, "bg_texture_var") and hasattr(self, "bg_texture_menu")
+
+        textures_dir = self._background_textures_dir()
+        paths: Dict[str, str] = {}
+        if os.path.isdir(textures_dir):
+            for name in sorted(os.listdir(textures_dir)):
+                if not name.lower().endswith(".png"):
+                    continue
+                paths[name] = os.path.join(textures_dir, name)
+
+        self._background_texture_paths = paths
+
+        # Preserve selection if still available.
+        if self._background_texture_name != "(none)" and self._background_texture_name not in paths:
+            self._background_texture_name = "(none)"
+            self._background_texture_src = None
+            self._background_texture_scaled.clear()
+            self._preview_background_cache_key = None
+            self._preview_background_image = None
+
+        if has_ui:
+            options = ["(none)"] + list(paths.keys())
+            menu = self.bg_texture_menu["menu"]
+            menu.delete(0, "end")
+            for opt in options:
+                menu.add_command(
+                    label=opt,
+                    command=lambda v=opt: self.bg_texture_var.set(v) or self._on_background_texture_changed(v),
+                )
+            self.bg_texture_var.set(self._background_texture_name)
+
+        # If there's exactly one background and nothing selected, auto-select it.
+        if self._background_texture_name == "(none)" and len(paths) == 1:
+            only = next(iter(paths.keys()))
+            if has_ui:
+                self.bg_texture_var.set(only)
+            self._on_background_texture_changed(only)
+
+    def _on_background_texture_changed(self, selection: str) -> None:
+        name = str(selection)
+        if name == self._background_texture_name:
+            return
+
+        self._background_texture_name = name
+        self._background_texture_src = None
+        self._background_texture_scaled.clear()
+        self._preview_background_cache_key = None
+        self._preview_background_image = None
+
+        if name == "(none)":
+            self.set_status("Preview background: none")
+            self.redraw()
+            return
+
+        path = self._background_texture_paths.get(name)
+        if not path or not os.path.isfile(path):
+            self._background_texture_name = "(none)"
+            self.set_status("Preview background: missing file")
+            self.redraw()
+            return
+
+        try:
+            self._background_texture_src = tk.PhotoImage(file=path)
+            self.set_status(f"Preview background: {name}")
+        except Exception:
+            self._background_texture_name = "(none)"
+            self._background_texture_src = None
+            self.set_status("Preview background: failed to load")
+
+        self.redraw()
+
+    def _scale_factors(self) -> Tuple[int, int]:
+        """Return (zoom, subsample) factors so: TILE_PX * zoom / subsample == cell_px."""
+        if self.cell_px == 40:
+            return 5, 2  # 16*5/2=40
+        if self.cell_px == 20:
+            return 5, 4  # 16*5/4=20
+        return 1, 1
+
+    def _get_scaled_background_tile(self) -> Optional[tk.PhotoImage]:
+        src = self._background_texture_src
+        if src is None:
+            return None
+
+        cached = self._background_texture_scaled.get(self.cell_px)
+        if cached is not None:
+            return cached
+
+        zoom, subsample = self._scale_factors()
+        tile = src
+        if zoom != 1 or subsample != 1:
+            tile = src.zoom(zoom, zoom).subsample(subsample, subsample)
+        self._background_texture_scaled[self.cell_px] = tile
+        return tile
+
+    def _background_signature(self) -> str:
+        return "".join("1" if v else "0" for row in self.background for v in row)
+
+    def _copy_wrapped(self, dest: tk.PhotoImage, src: tk.PhotoImage, sx: int, sy: int, w: int, h: int, dx: int, dy: int) -> None:
+        """Copy a w×h region from src starting at (sx,sy), wrapping around src edges."""
+        src_w = src.width()
+        src_h = src.height()
+
+        sx %= src_w
+        sy %= src_h
+
+        x_parts = [(sx, min(src_w, sx + w))]
+        if sx + w > src_w:
+            x_parts.append((0, (sx + w) - src_w))
+
+        y_parts = [(sy, min(src_h, sy + h))]
+        if sy + h > src_h:
+            y_parts.append((0, (sy + h) - src_h))
+
+        to_y = dy
+        for (y0, y1) in y_parts:
+            to_x = dx
+            for (x0, x1) in x_parts:
+                cw = x1 - x0
+                ch = y1 - y0
+                dest.tk.call(
+                    dest,
+                    "copy",
+                    src,
+                    "-from",
+                    x0,
+                    y0,
+                    x1,
+                    y1,
+                    "-to",
+                    to_x,
+                    to_y,
+                )
+                to_x += cw
+            to_y += ch
+
+    def _build_preview_background_image(self) -> Optional[tk.PhotoImage]:
+        tile = self._get_scaled_background_tile()
+        if tile is None:
+            return None
+
+        key = (self.current_page_id, self.grid_n, self.cell_px, self._background_texture_name, self._background_signature())
+        if self._preview_background_cache_key == key and self._preview_background_image is not None:
+            return self._preview_background_image
+
+        img = tk.PhotoImage(width=self.canvas_px, height=self.canvas_px)
+        src_w = tile.width()
+        src_h = tile.height()
+
+        for y in range(self.grid_n):
+            for x in range(self.grid_n):
+                if not self.background[y][x]:
+                    continue
+                x0 = x * self.cell_px
+                y0 = y * self.cell_px
+                sx = x0 % src_w
+                sy = y0 % src_h
+                self._copy_wrapped(img, tile, sx, sy, self.cell_px, self.cell_px, x0, y0)
+
+        self._preview_background_cache_key = key
+        self._preview_background_image = img
+        return img
+
     def _load_texture_sheet(self) -> None:
         """Load GUI_CTM.png if present; otherwise keep color-based preview."""
         path = self._texture_sheet_path()
@@ -1184,8 +1375,12 @@ class GuiBuilderApp:
                 return "button_hover"
             return "button_unpressed"
 
-        if ent.tool in (Tool.TEXT_SLOT, Tool.TEXT_ENTRY, Tool.SELECT_LIST):
+        if ent.tool == Tool.TEXT_SLOT:
             return "text_hover" if hovered else "text_unpressed"
+
+        if ent.tool in (Tool.TEXT_ENTRY, Tool.SELECT_LIST):
+            # Uses the dedicated generic border module (usually transparent inside).
+            return "generic_border"
 
         # Everything else falls back to color rendering for now.
         return ""
@@ -1210,6 +1405,29 @@ class GuiBuilderApp:
         cell_set = set(cells)
 
         for (cx, cy) in cells:
+            mask = self._ctm_mask(cell_set, cx, cy)
+            dx, dy = ctm_tile_offset(mask)
+            tile = sheet.get_tile(ox + dx, oy + dy, self.cell_px)
+            if tile is None:
+                return False
+            x0 = cx * self.cell_px
+            y0 = cy * self.cell_px
+            self.canvas.create_image(x0, y0, anchor="nw", image=tile)
+
+        return True
+
+    def _draw_cellset_textured(self, cell_set: "set[tuple[int,int]]", state_key: str) -> bool:
+        """Draw a connected-texture block for an arbitrary cell set."""
+        sheet = self._texture_sheet
+        if sheet is None:
+            return False
+
+        origin = CTM_ORIGINS.get(state_key)
+        if not origin:
+            return False
+
+        ox, oy = origin
+        for (cx, cy) in cell_set:
             mask = self._ctm_mask(cell_set, cx, cy)
             dx, dy = ctm_tile_offset(mask)
             tile = sheet.get_tile(ox + dx, oy + dy, self.cell_px)
@@ -1412,11 +1630,24 @@ class GuiBuilderApp:
     def redraw(self) -> None:
         self.canvas.delete("all")
 
-        # Background layer fill
-        for y in range(self.grid_n):
-            for x in range(self.grid_n):
-                if self.background[y][x]:
+        bg_cells = {(x, y) for y in range(self.grid_n) for x in range(self.grid_n) if self.background[y][x]}
+
+        # Background layer
+        if self.preview_mode:
+            bg_img = self._build_preview_background_image()
+            if bg_img is not None:
+                # Keep reference via self._preview_background_image (set by builder)
+                self.canvas.create_image(0, 0, anchor="nw", image=bg_img)
+            else:
+                for (x, y) in bg_cells:
                     self._draw_cell_fill(x, y, "#2b2b2b")
+
+            # Background border module (transparent overlay)
+            if bg_cells:
+                self._draw_cellset_textured(bg_cells, "background_border")
+        else:
+            for (x, y) in bg_cells:
+                self._draw_cell_fill(x, y, "#2b2b2b")
 
         # Entries layer
         for ent in self.entries.values():

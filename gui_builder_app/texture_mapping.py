@@ -17,6 +17,7 @@ from typing import Dict, Tuple
 
 TILE_PX = 16
 TEXTURE_SHEET_FILENAME = "GUI_CTM.png"
+BACKGROUND_TEXTURES_DIRNAME = "backgrounds"
 
 # Connected texture layout assumptions (tile coordinates, NOT pixels).
 # Each state is expected to be a 4x4 CTM block, addressed by a 4-neighbor bitmask.
@@ -29,6 +30,10 @@ CTM_ORIGINS: Dict[str, Tuple[int, int]] = {
     # Text areas / slots (connected-texture)
     "text_unpressed": (8, 0),
     "text_hover": (12, 0),
+    # Generic border (connected-texture) for select_list and text_entry
+    "generic_border": (8, 4),
+    # Background border (connected-texture), expected to include transparency
+    "background_border": (12, 4),
 }
 
 # Bit order for CTM 4-neighbor connections.

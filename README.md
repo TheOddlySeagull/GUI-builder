@@ -55,17 +55,30 @@ The values are **tile coordinates** (16×16 tiles), not pixels.
 
 Edit `ctm_tile_offset(mask)` in [gui_builder_app/texture_mapping.py](gui_builder_app/texture_mapping.py).
 
-By default it is row-major:
+The current implementation matches this 4×4 per-module layout:
 
-```py
-return (mask % 4, mask // 4)
-```
+- (0,0): single tile
+- Row 0 (y=0, x=1..3): horizontal strip (left/mid/right)
+- Col 0 (x=0, y=1..3): vertical strip (top/mid/bottom)
+- 3×3 block (x=1..3, y=1..3): nine-slice corners/edges/center
 
-If your sheet uses a different layout (common for CTM sheets), replace this function with your ordering.
+If your sheet differs, adjust `ctm_tile_offset(mask)`.
 
 3) **Neighbor bit convention** (which bit means N/E/S/W)
 
 Edit `CTM_DIRS` in [gui_builder_app/texture_mapping.py](gui_builder_app/texture_mapping.py).
+
+## Background textures (preview)
+
+You can pick a tiling PNG background in the left panel (preview uses it; edit mode stays grid-based).
+
+Create this folder next to `GUI_CTM.png`:
+
+- `backgrounds/`
+
+Put one or more `.png` files inside. The app will detect them and show them in a dropdown.
+
+The background borders come from the `background_border` module in the atlas and are expected to be partially transparent so the tiled PNG can show through.
 
 ## JSON export/import
 
