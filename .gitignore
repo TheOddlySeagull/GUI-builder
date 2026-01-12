@@ -1,2 +1,3 @@
 __pycache__/*
 gui_builder_app/__pycache__/*
+.vscode/settings.json
