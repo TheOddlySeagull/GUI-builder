@@ -51,6 +51,7 @@ class Entry:
     entry_id: int
     tool: Tool
     rect: Rect
+    uid: int = 0
     active: bool = False
     label: str = ""  # used for text_entry content / selected list value / etc
     meta: Dict[str, Any] = field(default_factory=dict)

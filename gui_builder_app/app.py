@@ -45,6 +45,9 @@ class GuiBuilderApp:
         self.current_page_id: int = 1
         self.start_page_id: int = 1
 
+        # Global unique ID for entries across all pages (stable for exports).
+        self.next_uid: int = 1
+
         # These are aliases to the currently selected page state.
         self.background: List[List[bool]]
         self.entries: Dict[int, Entry]
@@ -781,7 +784,10 @@ class GuiBuilderApp:
             else:
                 self.selection_frame.pack(fill="x")
 
-        self.selected_info_var.set(f"ID {ent.entry_id} | {ent.tool.value}")
+        if ent.uid:
+            self.selected_info_var.set(f"UID {ent.uid} | ID {ent.entry_id} | {ent.tool.value}")
+        else:
+            self.selected_info_var.set(f"ID {ent.entry_id} | {ent.tool.value}")
         meta = ent.meta if isinstance(ent.meta, dict) else {}
         self.sel_allow_hover_var.set(bool(meta.get("allow_hover", True)))
         hover = meta.get("hover")
@@ -1027,7 +1033,9 @@ class GuiBuilderApp:
 
         eid = self.next_entry_id
         self.next_entry_id += 1
-        ent = Entry(entry_id=eid, tool=self.current_tool, rect=rect)
+        uid = self.next_uid
+        self.next_uid += 1
+        ent = Entry(entry_id=eid, uid=uid, tool=self.current_tool, rect=rect)
         if self.current_tool == Tool.BUTTON_STANDARD:
             # Snapshot tool metadata into the entry so changes only affect newly placed buttons.
             ent.meta = json.loads(json.dumps(self.standard_button_tool_meta))
@@ -1729,6 +1737,7 @@ class GuiBuilderApp:
                     "entries": [
                         {
                             "id": e.entry_id,
+                            "uid": e.uid,
                             "tool": e.tool.value,
                             "rect": {"x0": e.rect.x0, "y0": e.rect.y0, "x1": e.rect.x1, "y1": e.rect.y1},
                             "active": e.active,
@@ -1744,6 +1753,7 @@ class GuiBuilderApp:
             "version": self.JSON_VERSION,
             "grid_n": self.grid_n,
             "start_page_id": self.start_page_id,
+            "next_uid": self.next_uid,
             "pages": pages_payload,
         }
 
@@ -1780,6 +1790,36 @@ class GuiBuilderApp:
         self.cell_px = self.canvas_px // self.grid_n
 
         self.pages.clear()
+
+        # Global unique IDs (UID) are optional in older exports.
+        used_uids: set[int] = set()
+        uid_counter = 1
+        try:
+            uid_counter = max(1, int(data.get("next_uid", 1)))
+        except (TypeError, ValueError):
+            uid_counter = 1
+        max_uid = 0
+
+        def _alloc_uid(requested: Any) -> int:
+            nonlocal uid_counter, max_uid
+
+            try:
+                rid = int(requested)
+            except (TypeError, ValueError):
+                rid = 0
+
+            if rid > 0 and rid not in used_uids:
+                used_uids.add(rid)
+                max_uid = max(max_uid, rid)
+                return rid
+
+            while uid_counter in used_uids:
+                uid_counter += 1
+
+            used_uids.add(uid_counter)
+            max_uid = max(max_uid, uid_counter)
+            uid_counter += 1
+            return max_uid
 
         for pobj in pages:
             if not isinstance(pobj, dict):
@@ -1831,8 +1871,11 @@ class GuiBuilderApp:
                 eid = int(obj["id"])
                 max_id = max(max_id, eid)
 
+                uid = _alloc_uid(obj.get("uid"))
+
                 ent = Entry(
                     entry_id=eid,
+                    uid=uid,
                     tool=tool,
                     rect=rect,
                     active=bool(obj.get("active", False)),
@@ -1847,6 +1890,9 @@ class GuiBuilderApp:
 
             st.next_entry_id = max_id + 1
             self.pages[page_id] = st
+
+        # Ensure the next UID is always above the max observed.
+        self.next_uid = max(uid_counter, max_uid + 1)
 
         start_pid = data.get("start_page_id", 1)
         try:
