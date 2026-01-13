@@ -4,7 +4,7 @@ A small Tkinter-based GUI layout editor + previewer.
 
 You paint a background, place interactive elements (buttons, text slots, text entry, select list, item slots) on a 16×16 or 32×32 grid, and export/import the layout as JSON.
 
-Preview mode can render elements using a connected-texture tilesheet (`GUI_CTM.png`) instead of flat colors.
+Preview mode can render elements using a connected-texture tilesheet (a skin pack `Modules.png`) instead of flat colors.
 
 ## Features
 
@@ -15,7 +15,7 @@ Preview mode can render elements using a connected-texture tilesheet (`GUI_CTM.p
 - Preview mode:
   - Interactions (toggle/press/standard buttons, text entry popup, select list popup)
   - Hover tooltips (per-element)
-  - Optional textured rendering via `GUI_CTM.png` (CTM)
+  - Optional textured rendering via skin packs (CTM)
 
 ## Requirements
 
@@ -33,10 +33,21 @@ From the repo root:
 py gui_builder.py
 ```
 
-## Texture sheet (GUI_CTM.png)
+## Skin packs (Modules.png + Background.png)
 
-If `GUI_CTM.png` is present next to `gui_builder.py`, preview mode will try to use it.
-If it’s missing or fails to load, the app falls back to solid-color rendering.
+The app supports multiple GUI “skins” via **skin packs**.
+
+Create this folder next to `gui_builder.py`:
+
+- `skin_packs/`
+
+Inside it, create one folder per skin name:
+
+- `skin_packs/<skin_name>/Modules.png`
+- `skin_packs/<skin_name>/Background.png` (optional; tiled under painted background cells)
+
+In the GUI, use the **Skin Pack** dropdown to select from detected packs.
+If no pack is selected (or Modules.png fails to load), preview falls back to solid colors.
 
 ### Where to fix the atlas mapping
 
@@ -81,15 +92,8 @@ Edit `CTM_DIRS` in [gui_builder_app/texture_mapping.py](gui_builder_app/texture_
 
 ## Background textures (preview)
 
-You can pick a tiling PNG background in the left panel (preview uses it; edit mode stays grid-based).
-
-Create this folder next to `GUI_CTM.png`:
-
-- `backgrounds/`
-
-Put one or more `.png` files inside. The app will detect them and show them in a dropdown.
-
-The background borders come from the `background_border` module in the atlas and are expected to be partially transparent so the tiled PNG can show through.
+Background tiling comes from the selected skin pack’s `Background.png`.
+The background borders come from the `background_border` module in the atlas and are expected to be partially transparent so the tiled background can show through.
 
 ## JSON export/import
 
@@ -125,7 +129,7 @@ Hover layout rule:
 
 2) **Flat backgrounds** (per page): exports a pixel-identical background image per page at the editor tile scale, merging:
 
-- painted background area (and the optional tiled PNG background if selected)
+- painted background area (tiled using the selected skin pack `Background.png` if present)
 - background border overlay
 - non-button elements (text entry/select list/text slot/item slot)
 
@@ -151,4 +155,4 @@ By default, export sheets are packed as 512×512.
 ## Notes
 
 - Switching between 16×16 and 32×32 currently clears the layout (MVP behavior).
-- The textured preview assumes a 16×16 tile atlas and scales tiles to the current cell size.
+- The textured preview assumes a 16×16 tile atlas (skin pack `Modules.png`) and scales tiles to the current cell size.

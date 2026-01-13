@@ -10,11 +10,12 @@ from typing import Any, Dict, List, Optional, Tuple
 from .models import Entry, PageState, Rect, SQUARE_ONLY, Tool
 from .texture import TextureSheet
 from .texture_mapping import (
-    BACKGROUND_TEXTURES_DIRNAME,
     CTM_DIRS,
     CTM_ORIGINS,
     ENTRY_TOOL_MODULES,
-    TEXTURE_SHEET_FILENAME,
+    BACKGROUND_FILENAME,
+    MODULES_FILENAME,
+    SKIN_PACKS_DIRNAME,
     TILE_PX,
     ctm_tile_offset,
 )
@@ -69,11 +70,11 @@ class GuiBuilderApp:
         # Preview hover state
         self._preview_hover_entry_id: Optional[int] = None
 
-        # Preview background texture selection (optional)
-        self._background_texture_paths: Dict[str, str] = {}
-        self._background_texture_name: str = "(none)"
-        self._background_texture_src: Optional[tk.PhotoImage] = None
-        self._background_texture_scaled: Dict[int, tk.PhotoImage] = {}
+        # Skin pack selection (Modules.png + Background.png)
+        self._skin_pack_paths: Dict[str, Dict[str, str]] = {}
+        self._skin_pack_name: str = "(none)"
+        self._skin_background_src: Optional[tk.PhotoImage] = None
+        self._skin_background_scaled: Dict[int, tk.PhotoImage] = {}
         self._preview_background_image: Optional[tk.PhotoImage] = None
         self._preview_background_cache_key: Optional[Tuple[int, int, int, str, str]] = None
 
@@ -99,9 +100,8 @@ class GuiBuilderApp:
         self._build_ui()
         self._bind_events()
 
-        # Load texture sheet after Tk is initialized.
-        self._load_texture_sheet()
-        self._scan_background_textures()
+        # Load skin packs after Tk is initialized.
+        self._scan_skin_packs()
         self.redraw()
 
     # ----------------------------
@@ -602,12 +602,12 @@ class GuiBuilderApp:
         self.grid_btn = tk.Button(left, text="Toggle 16×16 / 32×32", command=self.toggle_grid)
         self.grid_btn.pack(fill="x")
 
-        tk.Label(left, text="Background (preview)", font=("TkDefaultFont", 10, "bold")).pack(anchor="w", pady=(8, 0))
-        self.bg_texture_var = tk.StringVar(value="(none)")
-        self.bg_texture_menu = tk.OptionMenu(left, self.bg_texture_var, "(none)", command=self._on_background_texture_changed)
-        self.bg_texture_menu.pack(fill="x")
+        tk.Label(left, text="Skin Pack", font=("TkDefaultFont", 10, "bold")).pack(anchor="w", pady=(8, 0))
+        self.skin_pack_var = tk.StringVar(value="(none)")
+        self.skin_pack_menu = tk.OptionMenu(left, self.skin_pack_var, "(none)", command=self._on_skin_pack_changed)
+        self.skin_pack_menu.pack(fill="x")
 
-        tk.Button(left, text="Rescan backgrounds", command=self._scan_background_textures).pack(fill="x", pady=(4, 0))
+        tk.Button(left, text="Rescan skin packs", command=self._scan_skin_packs).pack(fill="x", pady=(4, 0))
 
         tk.Button(left, text="Export textures...", command=self.export_textures).pack(fill="x", pady=(8, 0))
 
@@ -1379,10 +1379,6 @@ class GuiBuilderApp:
         self.preview_mode = not self.preview_mode
         self.preview_btn.configure(text=f"Preview: {'ON' if self.preview_mode else 'OFF'}")
 
-        # If the user just dropped GUI_CTM.png next to the script, pick it up.
-        if self.preview_mode and self._texture_sheet is None:
-            self._load_texture_sheet()
-
         # Clear any held press interaction when switching modes
         self._preview_pressed_entry_id = None
 
@@ -1391,7 +1387,7 @@ class GuiBuilderApp:
         self.canvas.delete("hover_tip")
 
         if self.preview_mode and self._texture_sheet is None:
-            self.set_status(f"Mode: PREVIEW (interactive) | Texture missing: {TEXTURE_SHEET_FILENAME} (using colors)")
+            self.set_status("Mode: PREVIEW (interactive) | No skin pack selected (using colors)")
         else:
             self.set_status(f"Mode: {'PREVIEW (interactive)' if self.preview_mode else 'EDIT'}")
         self.redraw()
@@ -1422,88 +1418,118 @@ class GuiBuilderApp:
         self.redraw()
 
     # ----------------------------
-    # Texture sheet (preview)
+    # Skin packs (preview)
     # ----------------------------
 
-    def _texture_sheet_path(self) -> str:
+    def _assets_base_dir(self) -> str:
         # Prefer "next to the entrypoint" (gui_builder.py) since that's where users will drop assets.
-        base_dir = os.path.dirname(os.path.abspath(sys.argv[0])) if sys.argv and sys.argv[0] else os.getcwd()
-        return os.path.join(base_dir, TEXTURE_SHEET_FILENAME)
+        return os.path.dirname(os.path.abspath(sys.argv[0])) if sys.argv and sys.argv[0] else os.getcwd()
 
-    def _background_textures_dir(self) -> str:
-        return os.path.join(os.path.dirname(self._texture_sheet_path()), BACKGROUND_TEXTURES_DIRNAME)
+    def _skin_packs_dir(self) -> str:
+        return os.path.join(self._assets_base_dir(), SKIN_PACKS_DIRNAME)
 
-    def _scan_background_textures(self) -> None:
-        """Detect background textures from the backgrounds folder next to GUI_CTM.png."""
-        has_ui = hasattr(self, "bg_texture_var") and hasattr(self, "bg_texture_menu")
+    def _skin_pack_modules_path(self) -> Optional[str]:
+        if self._skin_pack_name == "(none)":
+            return None
+        info = self._skin_pack_paths.get(self._skin_pack_name)
+        if not info:
+            return None
+        return info.get("modules")
 
-        textures_dir = self._background_textures_dir()
-        paths: Dict[str, str] = {}
-        if os.path.isdir(textures_dir):
-            for name in sorted(os.listdir(textures_dir)):
-                if not name.lower().endswith(".png"):
+    def _skin_pack_background_path(self) -> Optional[str]:
+        if self._skin_pack_name == "(none)":
+            return None
+        info = self._skin_pack_paths.get(self._skin_pack_name)
+        if not info:
+            return None
+        return info.get("background")
+
+    def _scan_skin_packs(self) -> None:
+        """Detect skin packs from skin_packs/<name>/Modules.png (+ optional Background.png)."""
+        has_ui = hasattr(self, "skin_pack_var") and hasattr(self, "skin_pack_menu")
+
+        packs_dir = self._skin_packs_dir()
+        packs: Dict[str, Dict[str, str]] = {}
+        if os.path.isdir(packs_dir):
+            for name in sorted(os.listdir(packs_dir)):
+                full = os.path.join(packs_dir, name)
+                if not os.path.isdir(full):
                     continue
-                paths[name] = os.path.join(textures_dir, name)
+                modules = os.path.join(full, MODULES_FILENAME)
+                if not os.path.isfile(modules):
+                    continue
+                bg = os.path.join(full, BACKGROUND_FILENAME)
+                packs[name] = {
+                    "dir": full,
+                    "modules": modules,
+                    "background": bg if os.path.isfile(bg) else "",
+                }
 
-        self._background_texture_paths = paths
+        self._skin_pack_paths = packs
 
-        # Preserve selection if still available.
-        if self._background_texture_name != "(none)" and self._background_texture_name not in paths:
-            self._background_texture_name = "(none)"
-            self._background_texture_src = None
-            self._background_texture_scaled.clear()
-            self._preview_background_cache_key = None
-            self._preview_background_image = None
+        if self._skin_pack_name != "(none)" and self._skin_pack_name not in packs:
+            self._on_skin_pack_changed("(none)")
 
         if has_ui:
-            options = ["(none)"] + list(paths.keys())
-            menu = self.bg_texture_menu["menu"]
+            options = ["(none)"] + list(packs.keys())
+            menu = self.skin_pack_menu["menu"]
             menu.delete(0, "end")
             for opt in options:
                 menu.add_command(
                     label=opt,
-                    command=lambda v=opt: self.bg_texture_var.set(v) or self._on_background_texture_changed(v),
+                    command=lambda v=opt: self.skin_pack_var.set(v) or self._on_skin_pack_changed(v),
                 )
-            self.bg_texture_var.set(self._background_texture_name)
+            self.skin_pack_var.set(self._skin_pack_name)
 
-        # If there's exactly one background and nothing selected, auto-select it.
-        if self._background_texture_name == "(none)" and len(paths) == 1:
-            only = next(iter(paths.keys()))
+        # Auto-select if there's exactly one skin pack.
+        if self._skin_pack_name == "(none)" and len(packs) == 1:
+            only = next(iter(packs.keys()))
             if has_ui:
-                self.bg_texture_var.set(only)
-            self._on_background_texture_changed(only)
+                self.skin_pack_var.set(only)
+            self._on_skin_pack_changed(only)
 
-    def _on_background_texture_changed(self, selection: str) -> None:
+    def _on_skin_pack_changed(self, selection: str) -> None:
         name = str(selection)
-        if name == self._background_texture_name:
+        if name == self._skin_pack_name:
             return
 
-        self._background_texture_name = name
-        self._background_texture_src = None
-        self._background_texture_scaled.clear()
+        self._skin_pack_name = name
+        self._skin_background_src = None
+        self._skin_background_scaled.clear()
         self._preview_background_cache_key = None
         self._preview_background_image = None
 
+        # Reset texture sheet (preview modules)
+        self._texture_sheet = None
+
         if name == "(none)":
-            self.set_status("Preview background: none")
+            self.set_status("Skin pack: none (using colors)")
             self.redraw()
             return
 
-        path = self._background_texture_paths.get(name)
-        if not path or not os.path.isfile(path):
-            self._background_texture_name = "(none)"
-            self.set_status("Preview background: missing file")
+        modules_path = self._skin_pack_modules_path()
+        if not modules_path or not os.path.isfile(modules_path):
+            self._skin_pack_name = "(none)"
+            self.set_status("Skin pack: missing Modules.png")
             self.redraw()
             return
 
         try:
-            self._background_texture_src = tk.PhotoImage(file=path)
-            self.set_status(f"Preview background: {name}")
+            self._texture_sheet = TextureSheet(self.root, modules_path, tile_px=TILE_PX)
         except Exception:
-            self._background_texture_name = "(none)"
-            self._background_texture_src = None
-            self.set_status("Preview background: failed to load")
+            self._texture_sheet = None
 
+        bg_path = self._skin_pack_background_path()
+        if bg_path and os.path.isfile(bg_path):
+            try:
+                self._skin_background_src = tk.PhotoImage(file=bg_path)
+            except Exception:
+                self._skin_background_src = None
+
+        if self._texture_sheet is None:
+            self.set_status(f"Skin pack: {name} (modules failed to load)")
+        else:
+            self.set_status(f"Skin pack: {name}")
         self.redraw()
 
     def _scale_factors(self) -> Tuple[int, int]:
@@ -1535,11 +1561,11 @@ class GuiBuilderApp:
         return best_zoom, best_sub
 
     def _get_scaled_background_tile(self) -> Optional[tk.PhotoImage]:
-        src = self._background_texture_src
+        src = self._skin_background_src
         if src is None:
             return None
 
-        cached = self._background_texture_scaled.get(self.cell_px)
+        cached = self._skin_background_scaled.get(self.cell_px)
         if cached is not None:
             return cached
 
@@ -1547,7 +1573,7 @@ class GuiBuilderApp:
         tile = src
         if zoom != 1 or subsample != 1:
             tile = src.zoom(zoom, zoom).subsample(subsample, subsample)
-        self._background_texture_scaled[self.cell_px] = tile
+        self._skin_background_scaled[self.cell_px] = tile
         return tile
 
     def _background_signature(self) -> str:
@@ -1596,7 +1622,7 @@ class GuiBuilderApp:
         if tile is None:
             return None
 
-        key = (self.current_page_id, self.grid_n, self.cell_px, self._background_texture_name, self._background_signature())
+        key = (self.current_page_id, self.grid_n, self.cell_px, self._skin_pack_name, self._background_signature())
         if self._preview_background_cache_key == key and self._preview_background_image is not None:
             return self._preview_background_image
 
@@ -1619,17 +1645,11 @@ class GuiBuilderApp:
         return img
 
     def _load_texture_sheet(self) -> None:
-        """Load GUI_CTM.png if present; otherwise keep color-based preview."""
-        path = self._texture_sheet_path()
-        if not os.path.isfile(path):
-            self._texture_sheet = None
-            return
+        """Legacy no-op retained for compatibility.
 
-        try:
-            self._texture_sheet = TextureSheet(self.root, path, tile_px=TILE_PX)
-        except Exception:
-            # Keep app usable even if the PNG cannot be loaded.
-            self._texture_sheet = None
+        Preview textures are loaded via skin pack selection.
+        """
+        return
 
     def _ctm_mask(self, cell_set: "set[tuple[int, int]]", x: int, y: int) -> int:
         mask = 0
@@ -2022,14 +2042,14 @@ class GuiBuilderApp:
         return best_zoom, best_sub
 
     def _get_background_tile_for_export(self) -> Optional[tk.PhotoImage]:
-        """Return the background tile scaled to TILE_PX for export (or None)."""
+        """Return the current skin pack Background.png scaled to TILE_PX (or None)."""
 
-        src = self._background_texture_src
+        src = self._skin_background_src
         if src is None:
             return None
 
         # Cache the export-scale tile under key TILE_PX.
-        cached = self._background_texture_scaled.get(TILE_PX)
+        cached = self._skin_background_scaled.get(TILE_PX)
         if cached is not None:
             return cached
 
@@ -2042,7 +2062,7 @@ class GuiBuilderApp:
         tile = src
         if zoom != 1 or subsample != 1:
             tile = src.zoom(zoom, zoom).subsample(subsample, subsample)
-        self._background_texture_scaled[TILE_PX] = tile
+        self._skin_background_scaled[TILE_PX] = tile
         return tile
 
     def _blit_ctm_cellset_to_image(self, dest: tk.PhotoImage, atlas: tk.PhotoImage, cell_set: "set[tuple[int,int]]", state_key: str) -> bool:
@@ -2075,7 +2095,7 @@ class GuiBuilderApp:
         """Render a flat background image for a page.
 
         Includes:
-        - painted background (optionally tiled PNG background)
+        - painted background (tiled using the skin pack Background.png if present)
         - background border overlay
         - non-button elements (text entry/select list/text slot/item slot)
 
@@ -2152,11 +2172,12 @@ class GuiBuilderApp:
         - Everything else: merged into a per-page flat background texture.
         """
 
-        atlas_path = self._texture_sheet_path()
-        if not os.path.exists(atlas_path):
+        atlas_path = self._skin_pack_modules_path()
+        if not atlas_path or not os.path.exists(atlas_path):
             messagebox.showerror(
                 "Export textures",
-                f"Missing texture sheet: {atlas_path}\n\nPlace {TEXTURE_SHEET_FILENAME} next to gui_builder.py.",
+                "Missing skin pack modules.\n\n"
+                "Create: skin_packs/<skin_name>/Modules.png (+ optional Background.png), then select it in the Skin Pack dropdown.",
             )
             return
 
@@ -2586,7 +2607,7 @@ class GuiBuilderApp:
         self.canvas.create_rectangle(x0, y0, x1, y1, outline=color, width=2)
 
     def _draw_entry(self, ent: Entry) -> None:
-        # Preview: textured rendering using GUI_CTM.png (if available)
+        # Preview: textured rendering using the selected skin pack modules (if available)
         if self.preview_mode and self._texture_sheet is not None:
             if self._draw_entry_textured(ent):
                 # Keep debug labels in preview (can be removed later if you want a clean look)

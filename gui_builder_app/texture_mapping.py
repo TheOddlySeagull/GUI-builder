@@ -1,4 +1,4 @@
-"""Texture atlas mapping for GUI_CTM.png.
+"""Texture atlas mapping for GUI modules.
 
 This is the intended single place to tweak when your atlas layout changes.
 All coordinates are in TILE UNITS (16x16), not pixels.
@@ -18,8 +18,13 @@ from typing import Dict, Tuple
 from .models import Tool
 
 TILE_PX = 16
-TEXTURE_SHEET_FILENAME = "GUI_CTM.png"
-BACKGROUND_TEXTURES_DIRNAME = "backgrounds"
+
+# Skin pack layout (next to gui_builder.py):
+#   skin_packs/<skin_name>/Modules.png
+#   skin_packs/<skin_name>/Background.png
+SKIN_PACKS_DIRNAME = "skin_packs"
+MODULES_FILENAME = "Modules.png"
+BACKGROUND_FILENAME = "Background.png"
 
 
 def module_origin(mx: int, my: int) -> Tuple[int, int]:
@@ -33,7 +38,6 @@ def module_origin(mx: int, my: int) -> Tuple[int, int]:
 # Connected texture layout assumptions (tile coordinates, NOT pixels).
 # Each state is expected to be a 4x4 CTM block, addressed by a 4-neighbor bitmask.
 CTM_ORIGINS: Dict[str, Tuple[int, int]] = {
-    # Buttons (connected-texture)
     "button_unpressed": module_origin(0, 0),
     "button_hover": module_origin(1, 0),
     "button_pressed": module_origin(0, 1),
@@ -47,8 +51,6 @@ CTM_ORIGINS: Dict[str, Tuple[int, int]] = {
     "select_list_border": module_origin(2, 2),
     "select_list_border_hover": module_origin(3, 2),
     "background_border": module_origin(0, 3),
-    # Filler used when baking flat backgrounds: rendered under where buttons sit.
-    # Placed immediately to the right of background_border in the atlas.
     "button_background": module_origin(1, 3),
 }
 
