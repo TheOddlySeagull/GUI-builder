@@ -3,6 +3,11 @@
   "grid_n": 16,
   "start_page_id": 1,
   "next_uid": 14,
+  "available_in_skin_packs": [
+    "Default",
+    "Green",
+    "TanWood"
+  ],
   "pages": [
     {
       "page_id": 1,
