@@ -101,6 +101,7 @@ The background borders come from the `background_border` module in the atlas and
 - Current format is `version: 3` with:
   - `grid_n` (16 or 32)
   - `start_page_id`
+  - `available_in_skin_packs` (names detected at export time)
   - `pages[]` with `background_rects[]` and `entries[]`
 
 An example export lives in:
@@ -114,6 +115,10 @@ CustomNPCs expects button textures as single images (not multi-tile CTM renderin
 Use:
 
 - **File → Export Textures…**
+
+To export the same GUI textures for every detected skin pack:
+
+- **File → Export All Skin Packs…**
 
 This export produces two outputs:
 

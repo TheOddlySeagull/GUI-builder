@@ -225,6 +225,7 @@ class GuiBuilderApp:
         filemenu.add_command(label="Load JSON...", command=self.load_json)
         filemenu.add_separator()
         filemenu.add_command(label="Export Textures...", command=self.export_textures)
+        filemenu.add_command(label="Export All Skin Packs...", command=self.export_all_skin_packs)
         filemenu.add_separator()
         filemenu.add_command(label="Quit", command=self.root.quit)
         menubar.add_cascade(label="File", menu=filemenu)
@@ -610,6 +611,7 @@ class GuiBuilderApp:
         tk.Button(left, text="Rescan skin packs", command=self._scan_skin_packs).pack(fill="x", pady=(4, 0))
 
         tk.Button(left, text="Export textures...", command=self.export_textures).pack(fill="x", pady=(8, 0))
+        tk.Button(left, text="Export all skin packs...", command=self.export_all_skin_packs).pack(fill="x")
 
         self.preview_btn = tk.Button(left, text="Preview: OFF", command=self.toggle_preview)
         self.preview_btn.pack(fill="x", pady=(6, 0))
@@ -1782,8 +1784,15 @@ class GuiBuilderApp:
             "grid_n": self.grid_n,
             "start_page_id": self.start_page_id,
             "next_uid": self.next_uid,
+            "available_in_skin_packs": sorted(self._skin_pack_paths.keys()),
             "pages": pages_payload,
         }
+
+    def _safe_dir_name(self, name: str) -> str:
+        # Keep Windows path characters safe.
+        bad = '<>:"/\\|?*'
+        out = "".join(("_" if c in bad else c) for c in name).strip()
+        return out or "skin"
 
     def load_from_json_dict(self, data: dict) -> None:
         if not isinstance(data, dict):
@@ -2166,6 +2175,12 @@ class GuiBuilderApp:
         return img
 
     def export_textures(self) -> None:
+        out_dir = filedialog.askdirectory(title="Export textures folder")
+        if not out_dir:
+            return
+        self._export_textures_to(out_dir)
+
+    def _export_textures_to(self, out_dir: str, *, quiet: bool = False) -> Optional[Dict[str, Any]]:
         """Export GUI textures for CustomNPCs.
 
         - Buttons: exported as assembled textures, with hover directly beneath base.
@@ -2174,22 +2189,20 @@ class GuiBuilderApp:
 
         atlas_path = self._skin_pack_modules_path()
         if not atlas_path or not os.path.exists(atlas_path):
-            messagebox.showerror(
-                "Export textures",
-                "Missing skin pack modules.\n\n"
-                "Create: skin_packs/<skin_name>/Modules.png (+ optional Background.png), then select it in the Skin Pack dropdown.",
-            )
-            return
+            if not quiet:
+                messagebox.showerror(
+                    "Export textures",
+                    "Missing skin pack modules.\n\n"
+                    "Create: skin_packs/<skin_name>/Modules.png (+ optional Background.png), then select it in the Skin Pack dropdown.",
+                )
+            return None
 
         try:
             atlas = tk.PhotoImage(file=atlas_path)
         except Exception as e:
-            messagebox.showerror("Export textures", f"Failed to load texture sheet:\n{e}")
-            return
-
-        out_dir = filedialog.askdirectory(title="Export textures folder")
-        if not out_dir:
-            return
+            if not quiet:
+                messagebox.showerror("Export textures", f"Failed to load texture sheet:\n{e}")
+            return None
 
         button_tools = (Tool.BUTTON_STANDARD, Tool.BUTTON_PRESS, Tool.BUTTON_TOGGLE)
         # Build a set of unique packed blocks and a list of per-button references.
@@ -2416,8 +2429,9 @@ class GuiBuilderApp:
                 try:
                     sheet_img.write(out_path, format="png")
                 except Exception as e:
-                    messagebox.showerror("Export textures", f"Failed writing {filename}:\n{e}")
-                    return
+                    if not quiet:
+                        messagebox.showerror("Export textures", f"Failed writing {filename}:\n{e}")
+                    return None
 
                 manifest["sheets"].append({"filename": filename, "width": sw, "height": shh})
 
@@ -2469,8 +2483,9 @@ class GuiBuilderApp:
                 with open(manifest_path, "w", encoding="utf-8") as f:
                     json.dump(manifest, f, indent=2)
             except Exception as e:
-                messagebox.showerror("Export textures", f"Failed writing buttons_manifest.json:\n{e}")
-                return
+                if not quiet:
+                    messagebox.showerror("Export textures", f"Failed writing buttons_manifest.json:\n{e}")
+                return None
 
             export_lines.append(
                 f"Buttons: {len(items)} unique blocks, {ref_uses} uses, {len(sheets)} sheet(s)"
@@ -2500,8 +2515,9 @@ class GuiBuilderApp:
             try:
                 bg_img.write(out_path, format="png")
             except Exception as e:
-                messagebox.showerror("Export textures", f"Failed writing {filename}:\n{e}")
-                return
+                if not quiet:
+                    messagebox.showerror("Export textures", f"Failed writing {filename}:\n{e}")
+                return None
 
             bg_manifest["pages"][str(int(pid))] = {
                 "page_id": int(pid),
@@ -2519,20 +2535,75 @@ class GuiBuilderApp:
                 with open(bg_manifest_path, "w", encoding="utf-8") as f:
                     json.dump(bg_manifest, f, indent=2)
             except Exception as e:
-                messagebox.showerror("Export textures", f"Failed writing background_manifest.json:\n{e}")
-                return
+                if not quiet:
+                    messagebox.showerror("Export textures", f"Failed writing background_manifest.json:\n{e}")
+                return None
 
             export_lines.append(f"Backgrounds: {bg_exported} page(s)")
 
         self.set_status(" | ".join(export_lines))
-        messagebox.showinfo(
-            "Export textures",
-            "Export complete:\n\n"
-            + "\n".join(export_lines)
-            + "\n\nOutputs:\n"
-            + "- buttons_sheet_*.png + buttons_manifest.json\n"
-            + "- background_page_*.png + background_manifest.json",
-        )
+
+        if not quiet:
+            messagebox.showinfo(
+                "Export textures",
+                "Export complete:\n\n"
+                + "\n".join(export_lines)
+                + "\n\nOutputs:\n"
+                + "- buttons_sheet_*.png + buttons_manifest.json\n"
+                + "- background_page_*.png + background_manifest.json",
+            )
+
+        return {
+            "skin_pack": self._skin_pack_name,
+            "export_lines": export_lines,
+        }
+
+    def export_all_skin_packs(self) -> None:
+        # Refresh list first so we export what's actually on disk.
+        self._scan_skin_packs()
+
+        packs = sorted(self._skin_pack_paths.keys())
+        if not packs:
+            messagebox.showinfo(
+                "Export all skin packs",
+                "No skin packs found. Create skin_packs/<name>/Modules.png first.",
+            )
+            return
+
+        base_out_dir = filedialog.askdirectory(title="Export all skin packs folder")
+        if not base_out_dir:
+            return
+
+        previous = self._skin_pack_name
+        ok = 0
+        failed: List[str] = []
+
+        try:
+            for name in packs:
+                # Switch skin pack (loads modules/background).
+                self._on_skin_pack_changed(name)
+                out_dir = os.path.join(base_out_dir, self._safe_dir_name(name))
+                os.makedirs(out_dir, exist_ok=True)
+
+                res = self._export_textures_to(out_dir, quiet=True)
+                if res is None:
+                    failed.append(name)
+                else:
+                    ok += 1
+        finally:
+            # Restore previous selection.
+            self._on_skin_pack_changed(previous)
+
+        if failed:
+            messagebox.showwarning(
+                "Export all skin packs",
+                f"Exported {ok}/{len(packs)} skin packs. Failed: {', '.join(failed)}",
+            )
+        else:
+            messagebox.showinfo(
+                "Export all skin packs",
+                f"Exported {ok} skin packs into:\n{base_out_dir}",
+            )
 
     # ----------------------------
     # Rendering
