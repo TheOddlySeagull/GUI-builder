@@ -47,6 +47,9 @@ CTM_ORIGINS: Dict[str, Tuple[int, int]] = {
     "select_list_border": module_origin(2, 2),
     "select_list_border_hover": module_origin(3, 2),
     "background_border": module_origin(0, 3),
+    # Filler used when baking flat backgrounds: rendered under where buttons sit.
+    # Placed immediately to the right of background_border in the atlas.
+    "button_background": module_origin(1, 3),
 }
 
 

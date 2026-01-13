@@ -103,6 +103,43 @@ An example export lives in:
 
 - [gui_builder_app/exports/placeholder_0.json](gui_builder_app/exports/placeholder_0.json)
 
+## Export textures (for CustomNPCs)
+
+CustomNPCs expects button textures as single images (not multi-tile CTM rendering).
+
+Use:
+
+- **File → Export Textures…**
+
+This export produces two outputs:
+
+1) **Buttons** (assembled): exported as fully assembled images (base/hover/pressed/pressed_hover when available), packed into one or more PNG sheets plus a manifest:
+
+- `buttons_sheet_0.png`, `buttons_sheet_1.png`, ...
+- `buttons_manifest.json`
+
+Hover layout rule:
+
+- Hover is **directly beneath** the base texture in the packed output.
+- Pressed hover is **directly beneath** the pressed texture.
+
+2) **Flat backgrounds** (per page): exports a pixel-identical background image per page at the editor tile scale, merging:
+
+- painted background area (and the optional tiled PNG background if selected)
+- background border overlay
+- non-button elements (text entry/select list/text slot/item slot)
+
+Buttons are excluded from the background export (they remain separate assembled textures).
+
+To make exported GUIs look less empty, button rectangles are filled using the `button_background` CTM module when baking backgrounds.
+
+Outputs:
+
+- `background_page_<page_id>.png` (one PNG per page)
+- `background_manifest.json`
+
+By default, export sheets are packed as 512×512.
+
 ## Project layout
 
 - [gui_builder.py](gui_builder.py): thin entrypoint

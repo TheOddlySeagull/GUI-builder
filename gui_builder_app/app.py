@@ -23,6 +23,9 @@ from .texture_mapping import (
 class GuiBuilderApp:
     JSON_VERSION = 3
 
+    # Exported texture sheet size (pixels). Used to pack assembled button textures.
+    EXPORT_SHEET_PX = 512
+
     def __init__(self) -> None:
         self.root = tk.Tk()
         self.root.title("CustomNPCs GUI Builder (MVP)")
@@ -220,6 +223,8 @@ class GuiBuilderApp:
         filemenu = tk.Menu(menubar, tearoff=0)
         filemenu.add_command(label="Save JSON...", command=self.save_json)
         filemenu.add_command(label="Load JSON...", command=self.load_json)
+        filemenu.add_separator()
+        filemenu.add_command(label="Export Textures...", command=self.export_textures)
         filemenu.add_separator()
         filemenu.add_command(label="Quit", command=self.root.quit)
         menubar.add_cascade(label="File", menu=filemenu)
@@ -604,6 +609,8 @@ class GuiBuilderApp:
 
         tk.Button(left, text="Rescan backgrounds", command=self._scan_background_textures).pack(fill="x", pady=(4, 0))
 
+        tk.Button(left, text="Export textures...", command=self.export_textures).pack(fill="x", pady=(8, 0))
+
         self.preview_btn = tk.Button(left, text="Preview: OFF", command=self.toggle_preview)
         self.preview_btn.pack(fill="x", pady=(6, 0))
 
@@ -635,7 +642,8 @@ class GuiBuilderApp:
                 "PREVIEW MODE:\n"
                 "  Interact with buttons, open text/select popups\n"
                 "Square tools: item_slot\\n"
-                "File -> Save/Load JSON"
+                "File -> Save/Load JSON\\n"
+                "File -> Export Textures"
             ),
             anchor="w",
             justify="left",
@@ -1940,6 +1948,570 @@ class GuiBuilderApp:
             self.redraw()
         except Exception as e:
             messagebox.showerror("Load failed", str(e))
+
+    # ----------------------------
+    # Texture export
+    # ----------------------------
+
+    def _compose_entry_variant_image(self, atlas: tk.PhotoImage, ent: Entry, state_key: str) -> Optional[tk.PhotoImage]:
+        """Create a full-size assembled image for a single entry variant.
+
+        This is primarily used for buttons since CustomNPCs expects single-image textures
+        (not multi-tile CTM rendering) for button elements.
+        """
+
+        origin = CTM_ORIGINS.get(state_key)
+        if not origin:
+            return None
+
+        r = ent.rect.normalized()
+        w_tiles = r.width()
+        h_tiles = r.height()
+
+        # Build an unscaled pixel image (16px tiles).
+        out_w = w_tiles * TILE_PX
+        out_h = h_tiles * TILE_PX
+        if out_w <= 0 or out_h <= 0:
+            return None
+
+        out = tk.PhotoImage(width=out_w, height=out_h)
+
+        ox, oy = origin
+        cell_set = set(r.cells())
+
+        for (cx, cy) in r.cells():
+            mask = self._ctm_mask(cell_set, cx, cy)
+            dx, dy = ctm_tile_offset(mask)
+            src_col = ox + dx
+            src_row = oy + dy
+
+            sx0 = src_col * TILE_PX
+            sy0 = src_row * TILE_PX
+            sx1 = sx0 + TILE_PX
+            sy1 = sy0 + TILE_PX
+
+            dx0 = (cx - r.x0) * TILE_PX
+            dy0 = (cy - r.y0) * TILE_PX
+
+            out.tk.call(out, "copy", atlas, "-from", sx0, sy0, sx1, sy1, "-to", dx0, dy0)
+
+        return out
+
+    def _scale_factors_for(self, src_px: int, target_px: int) -> Tuple[int, int]:
+        """Return (zoom, subsample) so: src_px * zoom / subsample ~= target_px."""
+
+        if src_px <= 0 or target_px <= 0:
+            return 1, 1
+
+        best_zoom, best_sub = 1, 1
+        best_err = abs(src_px - target_px)
+        best_complexity = best_zoom * best_sub
+
+        for sub in range(1, 65):
+            zoom = int(round((target_px * sub) / src_px))
+            if zoom < 1 or zoom > 64:
+                continue
+            scaled = (src_px * zoom) / sub
+            err = abs(scaled - target_px)
+            complexity = zoom * sub
+            if err < best_err - 1e-9 or (abs(err - best_err) <= 1e-9 and complexity < best_complexity):
+                best_zoom, best_sub = zoom, sub
+                best_err = err
+                best_complexity = complexity
+
+        return best_zoom, best_sub
+
+    def _get_background_tile_for_export(self) -> Optional[tk.PhotoImage]:
+        """Return the background tile scaled to TILE_PX for export (or None)."""
+
+        src = self._background_texture_src
+        if src is None:
+            return None
+
+        # Cache the export-scale tile under key TILE_PX.
+        cached = self._background_texture_scaled.get(TILE_PX)
+        if cached is not None:
+            return cached
+
+        # Background tiles are expected to be 16x16, but scale if they aren't.
+        src_w = int(src.width())
+        if src_w <= 0:
+            return None
+
+        zoom, subsample = self._scale_factors_for(src_w, int(TILE_PX))
+        tile = src
+        if zoom != 1 or subsample != 1:
+            tile = src.zoom(zoom, zoom).subsample(subsample, subsample)
+        self._background_texture_scaled[TILE_PX] = tile
+        return tile
+
+    def _blit_ctm_cellset_to_image(self, dest: tk.PhotoImage, atlas: tk.PhotoImage, cell_set: "set[tuple[int,int]]", state_key: str) -> bool:
+        """Blit a CTM-rendered cell set into a PhotoImage at TILE_PX scale."""
+
+        origin = CTM_ORIGINS.get(state_key)
+        if not origin:
+            return False
+
+        ox, oy = origin
+        for (cx, cy) in cell_set:
+            mask = self._ctm_mask(cell_set, cx, cy)
+            dx, dy = ctm_tile_offset(mask)
+            src_col = ox + dx
+            src_row = oy + dy
+
+            sx0 = src_col * TILE_PX
+            sy0 = src_row * TILE_PX
+            sx1 = sx0 + TILE_PX
+            sy1 = sy0 + TILE_PX
+
+            dx0 = cx * TILE_PX
+            dy0 = cy * TILE_PX
+
+            dest.tk.call(dest, "copy", atlas, "-from", sx0, sy0, sx1, sy1, "-to", dx0, dy0)
+
+        return True
+
+    def _render_flat_background_page(self, atlas: tk.PhotoImage, page_id: int) -> Optional[tk.PhotoImage]:
+        """Render a flat background image for a page.
+
+        Includes:
+        - painted background (optionally tiled PNG background)
+        - background border overlay
+        - non-button elements (text entry/select list/text slot/item slot)
+
+        Excludes buttons entirely.
+        Output is TILE_PX-per-cell (16x16 -> 256x256, 32x32 -> 512x512).
+        """
+
+        page = self.pages.get(page_id)
+        if page is None:
+            return None
+
+        out_px = int(self.grid_n) * int(TILE_PX)
+        if out_px <= 0:
+            return None
+
+        img = tk.PhotoImage(width=out_px, height=out_px)
+
+        bg_cells = {(x, y) for y in range(self.grid_n) for x in range(self.grid_n) if page.background[y][x]}
+
+        # Base background (tiled PNG) or a flat fill for painted cells.
+        tile = self._get_background_tile_for_export()
+        if tile is not None:
+            src_w = tile.width()
+            src_h = tile.height()
+            if src_w > 0 and src_h > 0:
+                for (x, y) in bg_cells:
+                    x0 = x * TILE_PX
+                    y0 = y * TILE_PX
+                    sx = x0 % src_w
+                    sy = y0 % src_h
+                    self._copy_wrapped(img, tile, sx, sy, TILE_PX, TILE_PX, x0, y0)
+        else:
+            solid = tk.PhotoImage(width=TILE_PX, height=TILE_PX)
+            solid.put("#2b2b2b", to=(0, 0, TILE_PX, TILE_PX))
+            for (x, y) in bg_cells:
+                dx0 = x * TILE_PX
+                dy0 = y * TILE_PX
+                img.tk.call(img, "copy", solid, "-from", 0, 0, TILE_PX, TILE_PX, "-to", dx0, dy0)
+
+        # Background border overlay
+        if bg_cells:
+            self._blit_ctm_cellset_to_image(img, atlas, bg_cells, "background_border")
+
+        # Fill where buttons should sit (so the baked background doesn't look empty).
+        # IMPORTANT: render each button separately to avoid CTM connections between distinct buttons.
+        button_tools = {Tool.BUTTON_STANDARD, Tool.BUTTON_PRESS, Tool.BUTTON_TOGGLE}
+        for ent in page.entries.values():
+            if ent.tool not in button_tools:
+                continue
+            r = ent.rect.normalized()
+            cell_set = set(r.cells())
+            self._blit_ctm_cellset_to_image(img, atlas, cell_set, "button_background")
+
+        # Overlay non-button elements.
+        for ent in page.entries.values():
+            if ent.tool in button_tools or ent.tool == Tool.BACKGROUND:
+                continue
+
+            modules = ENTRY_TOOL_MODULES.get(ent.tool) or {}
+            base_module = modules.get("base")
+            if not base_module:
+                continue
+
+            r = ent.rect.normalized()
+            cell_set = set(r.cells())
+            self._blit_ctm_cellset_to_image(img, atlas, cell_set, str(base_module))
+
+        return img
+
+    def export_textures(self) -> None:
+        """Export GUI textures for CustomNPCs.
+
+        - Buttons: exported as assembled textures, with hover directly beneath base.
+        - Everything else: merged into a per-page flat background texture.
+        """
+
+        atlas_path = self._texture_sheet_path()
+        if not os.path.exists(atlas_path):
+            messagebox.showerror(
+                "Export textures",
+                f"Missing texture sheet: {atlas_path}\n\nPlace {TEXTURE_SHEET_FILENAME} next to gui_builder.py.",
+            )
+            return
+
+        try:
+            atlas = tk.PhotoImage(file=atlas_path)
+        except Exception as e:
+            messagebox.showerror("Export textures", f"Failed to load texture sheet:\n{e}")
+            return
+
+        out_dir = filedialog.askdirectory(title="Export textures folder")
+        if not out_dir:
+            return
+
+        button_tools = (Tool.BUTTON_STANDARD, Tool.BUTTON_PRESS, Tool.BUTTON_TOGGLE)
+        # Build a set of unique packed blocks and a list of per-button references.
+        #
+        # IMPORTANT: CustomNPCs hover texture is taken from directly beneath the base texture.
+        # So we pack (base over hover) and (pressed over pressed_hover) as 2-row blocks.
+        # (kind, top_module, bottom_module, w_tiles, h_tiles)
+        unique_blocks: Dict[Tuple[str, str, str, int, int], Dict[str, Any]] = {}
+        refs: List[Dict[str, Any]] = []
+
+        def _stack_pair(top: tk.PhotoImage, bottom: tk.PhotoImage) -> tk.PhotoImage:
+            w = int(top.width())
+            h = int(top.height())
+            out = tk.PhotoImage(width=w, height=h * 2)
+            out.tk.call(out, "copy", top, "-from", 0, 0, w, h, "-to", 0, 0)
+            out.tk.call(out, "copy", bottom, "-from", 0, 0, w, h, "-to", 0, h)
+            return out
+
+        # Collect per-button references; generate unique packed blocks once.
+        for pid in self._sorted_page_ids():
+            page = self.pages[pid]
+            for ent in page.entries.values():
+                if ent.tool not in button_tools:
+                    continue
+
+                modules = ENTRY_TOOL_MODULES.get(ent.tool) or {}
+                r = ent.rect.normalized()
+                w_tiles = int(r.width())
+                h_tiles = int(r.height())
+
+                # Unpressed pair (base + hover). If hover module is missing, fall back to base.
+                base_module = modules.get("base")
+                if base_module:
+                    hover_module = modules.get("hover") or base_module
+                    unpressed_key: Tuple[str, str, str, int, int] = (
+                        "unpressed",
+                        str(base_module),
+                        str(hover_module),
+                        w_tiles,
+                        h_tiles,
+                    )
+                    if unpressed_key not in unique_blocks:
+                        base_img = self._compose_entry_variant_image(atlas, ent, str(base_module))
+                        hover_img = self._compose_entry_variant_image(atlas, ent, str(hover_module))
+                        if base_img is None:
+                            continue
+                        if hover_img is None:
+                            hover_img = base_img
+                        block_img = _stack_pair(base_img, hover_img)
+                        unique_blocks[unpressed_key] = {
+                            "kind": "unpressed",
+                            "top_module": str(base_module),
+                            "bottom_module": str(hover_module),
+                            "w": int(block_img.width()),
+                            "h": int(block_img.height()),
+                            "row_h": int(base_img.height()),
+                            "image": block_img,
+                        }
+
+                    refs.append(
+                        {
+                            "uid": int(getattr(ent, "uid", 0) or 0),
+                            "page_id": int(pid),
+                            "entry_id": int(ent.entry_id),
+                            "tool": ent.tool.value,
+                            "variants": {
+                                "base": {"block_key": unpressed_key, "row": 0},
+                                "hover": {"block_key": unpressed_key, "row": 1},
+                            },
+                        }
+                    )
+
+                # Pressed pair (pressed + pressed_hover). If pressed_hover module is missing, fall back to pressed.
+                pressed_module = modules.get("pressed")
+                if pressed_module:
+                    pressed_hover_module = modules.get("pressed_hover") or pressed_module
+                    pressed_key: Tuple[str, str, str, int, int] = (
+                        "pressed",
+                        str(pressed_module),
+                        str(pressed_hover_module),
+                        w_tiles,
+                        h_tiles,
+                    )
+                    if pressed_key not in unique_blocks:
+                        pressed_img = self._compose_entry_variant_image(atlas, ent, str(pressed_module))
+                        hover_img = self._compose_entry_variant_image(atlas, ent, str(pressed_hover_module))
+                        if pressed_img is None:
+                            # If pressed is missing, skip pressed exports.
+                            pressed_img = None
+                        if pressed_img is not None:
+                            if hover_img is None:
+                                hover_img = pressed_img
+                            block_img = _stack_pair(pressed_img, hover_img)
+                            unique_blocks[pressed_key] = {
+                                "kind": "pressed",
+                                "top_module": str(pressed_module),
+                                "bottom_module": str(pressed_hover_module),
+                                "w": int(block_img.width()),
+                                "h": int(block_img.height()),
+                                "row_h": int(pressed_img.height()),
+                                "image": block_img,
+                            }
+
+                    # Attach pressed variants to the most recent ref for this entry if it exists.
+                    if refs and refs[-1].get("entry_id") == int(ent.entry_id) and refs[-1].get("page_id") == int(pid):
+                        refs[-1]["variants"].update(
+                            {
+                                "pressed": {"block_key": pressed_key, "row": 0},
+                                "pressed_hover": {"block_key": pressed_key, "row": 1},
+                            }
+                        )
+                    else:
+                        refs.append(
+                            {
+                                "uid": int(getattr(ent, "uid", 0) or 0),
+                                "page_id": int(pid),
+                                "entry_id": int(ent.entry_id),
+                                "tool": ent.tool.value,
+                                "variants": {
+                                    "pressed": {"block_key": pressed_key, "row": 0},
+                                    "pressed_hover": {"block_key": pressed_key, "row": 1},
+                                },
+                            }
+                        )
+
+        export_lines: List[str] = []
+
+        # ----------------------------
+        # 1) Buttons (assembled)
+        # ----------------------------
+        if refs:
+            # Convert unique blocks to a list for packing.
+            items: List[Dict[str, Any]] = []
+            for block_key, it in unique_blocks.items():
+                items.append({"block_key": block_key, **it})
+
+            # Sort for simple shelf packing.
+            items.sort(key=lambda it: (it["h"], it["w"]), reverse=True)
+
+            max_px = int(self.EXPORT_SHEET_PX)
+            if max_px < TILE_PX:
+                max_px = 512
+
+            sheets: List[Dict[str, Any]] = []
+            cur_items: List[Dict[str, Any]] = []
+            x = 0
+            y = 0
+            row_h = 0
+
+            def flush_sheet() -> None:
+                nonlocal cur_items, x, y, row_h
+                if not cur_items:
+                    return
+                sheets.append({"w": max_px, "h": max_px, "placements": cur_items})
+                cur_items = []
+                x = 0
+                y = 0
+                row_h = 0
+
+            for it in items:
+                w = int(it["w"])
+                h = int(it["h"])
+
+                # Oversized images get their own dedicated sheet.
+                if w > max_px or h > max_px:
+                    flush_sheet()
+                    sheets.append({"w": w, "h": h, "placements": [{"x": 0, "y": 0, "item": it}]})
+                    continue
+
+                if x + w > max_px:
+                    x = 0
+                    y += row_h
+                    row_h = 0
+
+                if y + h > max_px:
+                    flush_sheet()
+
+                cur_items.append({"x": x, "y": y, "item": it})
+                x += w
+                row_h = max(row_h, h)
+
+            flush_sheet()
+
+            # Index placements for fast lookup when writing the manifest.
+            placement_index: Dict[Tuple[str, str, str, int, int], Dict[str, int]] = {}
+            for sheet_idx, sh in enumerate(sheets):
+                for pl in sh["placements"]:
+                    it = pl["item"]
+                    placement_index[it["block_key"]] = {
+                        "sheet": int(sheet_idx),
+                        "x": int(pl["x"]),
+                        "y": int(pl["y"]),
+                        "w": int(it["w"]),
+                        "h": int(it["h"]),
+                        "row_h": int(it.get("row_h") or (int(it["h"]) // 2)),
+                    }
+
+            manifest: Dict[str, Any] = {
+                "version": 1,
+                "source_atlas": os.path.basename(atlas_path),
+                "tile_px": TILE_PX,
+                "sheet_px": max_px,
+                "sheets": [],
+                "buttons": {},
+            }
+
+            # Render sheets and write PNGs.
+            for sheet_idx, sh in enumerate(sheets):
+                sw = int(sh["w"])
+                shh = int(sh["h"])
+                sheet_img = tk.PhotoImage(width=sw, height=shh)
+
+                for pl in sh["placements"]:
+                    px = int(pl["x"])
+                    py = int(pl["y"])
+                    it = pl["item"]
+                    img: tk.PhotoImage = it["image"]
+                    w = int(it["w"])
+                    h = int(it["h"])
+                    sheet_img.tk.call(sheet_img, "copy", img, "-from", 0, 0, w, h, "-to", px, py)
+
+                filename = f"buttons_sheet_{sheet_idx}.png"
+                out_path = os.path.join(out_dir, filename)
+                try:
+                    sheet_img.write(out_path, format="png")
+                except Exception as e:
+                    messagebox.showerror("Export textures", f"Failed writing {filename}:\n{e}")
+                    return
+
+                manifest["sheets"].append({"filename": filename, "width": sw, "height": shh})
+
+            # Build the per-button mapping, referencing packed unique blocks.
+            ref_uses = 0
+            for ref in refs:
+                uid = int(ref.get("uid") or 0)
+                if uid <= 0:
+                    uid = int(ref.get("entry_id") or 0)
+
+                b = manifest["buttons"].setdefault(
+                    str(uid),
+                    {
+                        "uid": uid,
+                        "page_id": int(ref["page_id"]),
+                        "entry_id": int(ref["entry_id"]),
+                        "tool": str(ref["tool"]),
+                        "variants": {},
+                    },
+                )
+
+                variants = ref.get("variants")
+                if not isinstance(variants, dict):
+                    continue
+
+                for vname, vinfo in variants.items():
+                    if not isinstance(vinfo, dict):
+                        continue
+                    block_key = vinfo.get("block_key")
+                    row = int(vinfo.get("row", 0))
+                    pos = placement_index.get(block_key)
+                    if not pos:
+                        continue
+                    row_h = int(pos.get("row_h") or 0)
+                    if row_h <= 0:
+                        continue
+
+                    ref_uses += 1
+                    b["variants"][str(vname)] = {
+                        "sheet": int(pos["sheet"]),
+                        "x": int(pos["x"]),
+                        "y": int(pos["y"]) + (row * row_h),
+                        "w": int(pos["w"]),
+                        "h": row_h,
+                    }
+
+            manifest_path = os.path.join(out_dir, "buttons_manifest.json")
+            try:
+                with open(manifest_path, "w", encoding="utf-8") as f:
+                    json.dump(manifest, f, indent=2)
+            except Exception as e:
+                messagebox.showerror("Export textures", f"Failed writing buttons_manifest.json:\n{e}")
+                return
+
+            export_lines.append(
+                f"Buttons: {len(items)} unique blocks, {ref_uses} uses, {len(sheets)} sheet(s)"
+            )
+        else:
+            export_lines.append("Buttons: none")
+
+        # ----------------------------
+        # 2) Flat backgrounds (per page, one PNG per page)
+        # ----------------------------
+        bg_manifest: Dict[str, Any] = {
+            "version": 2,
+            "grid_n": int(self.grid_n),
+            "tile_px": int(TILE_PX),
+            "start_page_id": int(self.start_page_id),
+            "pages": {},
+        }
+
+        bg_exported = 0
+        for pid in self._sorted_page_ids():
+            bg_img = self._render_flat_background_page(atlas, pid)
+            if bg_img is None:
+                continue
+
+            filename = f"background_page_{int(pid)}.png"
+            out_path = os.path.join(out_dir, filename)
+            try:
+                bg_img.write(out_path, format="png")
+            except Exception as e:
+                messagebox.showerror("Export textures", f"Failed writing {filename}:\n{e}")
+                return
+
+            bg_manifest["pages"][str(int(pid))] = {
+                "page_id": int(pid),
+                "filename": filename,
+                "width": int(bg_img.width()),
+                "height": int(bg_img.height()),
+            }
+            bg_exported += 1
+
+        if bg_exported <= 0:
+            export_lines.append("Backgrounds: none")
+        else:
+            bg_manifest_path = os.path.join(out_dir, "background_manifest.json")
+            try:
+                with open(bg_manifest_path, "w", encoding="utf-8") as f:
+                    json.dump(bg_manifest, f, indent=2)
+            except Exception as e:
+                messagebox.showerror("Export textures", f"Failed writing background_manifest.json:\n{e}")
+                return
+
+            export_lines.append(f"Backgrounds: {bg_exported} page(s)")
+
+        self.set_status(" | ".join(export_lines))
+        messagebox.showinfo(
+            "Export textures",
+            "Export complete:\n\n"
+            + "\n".join(export_lines)
+            + "\n\nOutputs:\n"
+            + "- buttons_sheet_*.png + buttons_manifest.json\n"
+            + "- background_page_*.png + background_manifest.json",
+        )
 
     # ----------------------------
     # Rendering
