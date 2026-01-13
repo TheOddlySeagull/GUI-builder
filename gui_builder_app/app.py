@@ -2339,28 +2339,62 @@ class GuiBuilderApp:
             for block_key, it in unique_blocks.items():
                 items.append({"block_key": block_key, **it})
 
-            # Sort for simple shelf packing.
-            items.sort(key=lambda it: (it["h"], it["w"]), reverse=True)
+            # Sort big-to-small to reduce fragmentation. Placement still uses a
+            # top-left first-fit search, so small items will fill earlier gaps.
+            items.sort(key=lambda it: (int(it["h"]) * int(it["w"]), it["h"], it["w"]), reverse=True)
 
             max_px = int(self.EXPORT_SHEET_PX)
             if max_px < TILE_PX:
                 max_px = 512
 
             sheets: List[Dict[str, Any]] = []
-            cur_items: List[Dict[str, Any]] = []
-            x = 0
-            y = 0
-            row_h = 0
 
-            def flush_sheet() -> None:
-                nonlocal cur_items, x, y, row_h
-                if not cur_items:
-                    return
-                sheets.append({"w": max_px, "h": max_px, "placements": cur_items})
-                cur_items = []
-                x = 0
-                y = 0
-                row_h = 0
+            sheet_tiles = max(1, int(max_px) // int(TILE_PX))
+
+            def _new_sheet() -> Dict[str, Any]:
+                return {
+                    "w": max_px,
+                    "h": max_px,
+                    "placements": [],
+                    "occ": [[False for _ in range(sheet_tiles)] for _ in range(sheet_tiles)],
+                }
+
+            def _tiles_needed(px: int) -> int:
+                return max(1, (int(px) + int(TILE_PX) - 1) // int(TILE_PX))
+
+            def _can_place(occ: List[List[bool]], x0: int, y0: int, w_t: int, h_t: int) -> bool:
+                if x0 < 0 or y0 < 0:
+                    return False
+                if x0 + w_t > sheet_tiles or y0 + h_t > sheet_tiles:
+                    return False
+                for yy in range(y0, y0 + h_t):
+                    row = occ[yy]
+                    for xx in range(x0, x0 + w_t):
+                        if row[xx]:
+                            return False
+                return True
+
+            def _mark(occ: List[List[bool]], x0: int, y0: int, w_t: int, h_t: int) -> None:
+                for yy in range(y0, y0 + h_t):
+                    row = occ[yy]
+                    for xx in range(x0, x0 + w_t):
+                        row[xx] = True
+
+            def _place_in_sheet(sheet: Dict[str, Any], it: Dict[str, Any]) -> bool:
+                w = int(it["w"])
+                h = int(it["h"])
+                w_t = _tiles_needed(w)
+                h_t = _tiles_needed(h)
+                occ = sheet["occ"]
+
+                # Top-left first-fit.
+                for y0 in range(0, sheet_tiles - h_t + 1):
+                    for x0 in range(0, sheet_tiles - w_t + 1):
+                        if _can_place(occ, x0, y0, w_t, h_t):
+                            _mark(occ, x0, y0, w_t, h_t)
+                            sheet["placements"].append({"x": x0 * TILE_PX, "y": y0 * TILE_PX, "item": it})
+                            return True
+                return False
 
             for it in items:
                 w = int(it["w"])
@@ -2368,23 +2402,27 @@ class GuiBuilderApp:
 
                 # Oversized images get their own dedicated sheet.
                 if w > max_px or h > max_px:
-                    flush_sheet()
                     sheets.append({"w": w, "h": h, "placements": [{"x": 0, "y": 0, "item": it}]})
                     continue
 
-                if x + w > max_px:
-                    x = 0
-                    y += row_h
-                    row_h = 0
+                placed = False
+                for sh in sheets:
+                    if sh.get("occ") is None:
+                        # Dedicated oversized sheet; skip.
+                        continue
+                    if _place_in_sheet(sh, it):
+                        placed = True
+                        break
 
-                if y + h > max_px:
-                    flush_sheet()
+                if not placed:
+                    sh = _new_sheet()
+                    _place_in_sheet(sh, it)
+                    sheets.append(sh)
 
-                cur_items.append({"x": x, "y": y, "item": it})
-                x += w
-                row_h = max(row_h, h)
-
-            flush_sheet()
+            # Strip occupancy before rendering/writing (keep output JSON clean).
+            for sh in sheets:
+                if "occ" in sh:
+                    del sh["occ"]
 
             # Index placements for fast lookup when writing the manifest.
             placement_index: Dict[Tuple[str, str, str, int, int], Dict[str, int]] = {}
