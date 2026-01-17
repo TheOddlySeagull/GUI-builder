@@ -31,6 +31,9 @@ class GuiBuilderApp:
         self.root = tk.Tk()
         self.root.title("CustomNPCs GUI Builder (MVP)")
 
+        # Name used as the top-level export folder (exports/<gui_name>/...).
+        self.gui_name_var = tk.StringVar(value="unnamed_gui")
+
         # Optional texture sheet for preview rendering.
         self._texture_sheet: Optional[TextureSheet] = None
 
@@ -609,6 +612,9 @@ class GuiBuilderApp:
         self.skin_pack_menu.pack(fill="x")
 
         tk.Button(left, text="Rescan skin packs", command=self._scan_skin_packs).pack(fill="x", pady=(4, 0))
+
+        tk.Label(left, text="GUI Name", font=("TkDefaultFont", 10, "bold")).pack(anchor="w", pady=(8, 0))
+        tk.Entry(left, textvariable=self.gui_name_var).pack(fill="x")
 
         tk.Button(left, text="Export textures...", command=self.export_textures).pack(fill="x", pady=(8, 0))
         tk.Button(left, text="Export all skin packs...", command=self.export_all_skin_packs).pack(fill="x")
@@ -1794,6 +1800,10 @@ class GuiBuilderApp:
         out = "".join(("_" if c in bad else c) for c in name).strip()
         return out or "skin"
 
+    def _safe_gui_name(self, name: str) -> str:
+        safe = self._safe_dir_name(str(name))
+        return safe if safe != "skin" else "gui"
+
     def load_from_json_dict(self, data: dict) -> None:
         if not isinstance(data, dict):
             raise ValueError("Invalid JSON root (expected object).")
@@ -2179,10 +2189,17 @@ class GuiBuilderApp:
         if group_by_size is None:
             return
 
-        out_dir = filedialog.askdirectory(title="Export textures folder")
-        if not out_dir:
+        base_out_dir = filedialog.askdirectory(title="Export base folder")
+        if not base_out_dir:
             return
-        self._export_textures_to(out_dir, group_by_size=group_by_size)
+
+        gui_root = os.path.join(base_out_dir, self._safe_gui_name(self.gui_name_var.get()))
+        os.makedirs(gui_root, exist_ok=True)
+
+        # Keep exports grouped by skin pack name, even for single-pack export.
+        skin_dir = os.path.join(gui_root, self._safe_dir_name(self._skin_pack_name))
+        os.makedirs(skin_dir, exist_ok=True)
+        self._export_textures_to(skin_dir, group_by_size=group_by_size)
 
     def _ask_export_button_grouping(self) -> Optional[bool]:
         """Ask how button textures should be exported.
@@ -2668,9 +2685,12 @@ class GuiBuilderApp:
             )
             return
 
-        base_out_dir = filedialog.askdirectory(title="Export all skin packs folder")
+        base_out_dir = filedialog.askdirectory(title="Export base folder")
         if not base_out_dir:
             return
+
+        gui_root = os.path.join(base_out_dir, self._safe_gui_name(self.gui_name_var.get()))
+        os.makedirs(gui_root, exist_ok=True)
 
         previous = self._skin_pack_name
         ok = 0
@@ -2680,7 +2700,7 @@ class GuiBuilderApp:
             for name in packs:
                 # Switch skin pack (loads modules/background).
                 self._on_skin_pack_changed(name)
-                out_dir = os.path.join(base_out_dir, self._safe_dir_name(name))
+                out_dir = os.path.join(gui_root, self._safe_dir_name(name))
                 os.makedirs(out_dir, exist_ok=True)
 
                 res = self._export_textures_to(out_dir, group_by_size=group_by_size, quiet=True)
@@ -2700,7 +2720,7 @@ class GuiBuilderApp:
         else:
             messagebox.showinfo(
                 "Export all skin packs",
-                f"Exported {ok} skin packs into:\n{base_out_dir}",
+                f"Exported {ok} skin packs into:\n{gui_root}",
             )
 
     # ----------------------------

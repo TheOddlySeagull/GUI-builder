@@ -116,6 +116,11 @@ Use:
 
 - **File → Export Textures…**
 
+Set **GUI Name** in the left panel before exporting.
+Exports will be written under:
+
+- `/<export base folder>/<gui_name>/<skin_pack_name>/...`
+
 When exporting, you can choose:
 
 - **Reuse one texture per button size** (default/current behavior)
