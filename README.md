@@ -121,6 +121,10 @@ Exports will be written under:
 
 - `/<export base folder>/<gui_name>/<skin_pack_name>/...`
 
+Manifests are grouped into one file:
+
+- `/<export base folder>/<gui_name>/gui_manifest.json`
+
 When exporting, you can choose:
 
 - **Reuse one texture per button size** (default/current behavior)
@@ -134,8 +138,8 @@ This export produces two outputs:
 
 1) **Buttons** (assembled): exported as fully assembled images (base/hover/pressed/pressed_hover when available), packed into one or more PNG sheets plus a manifest:
 
-- `buttons_sheet_0.png`, `buttons_sheet_1.png`, ...
-- `buttons_manifest.json`
+- `<skin_pack_name>/buttons_sheet_0.png`, `<skin_pack_name>/buttons_sheet_1.png`, ...
+- (referenced from `gui_manifest.json`)
 
 Hover layout rule:
 
@@ -154,8 +158,8 @@ To make exported GUIs look less empty, button rectangles are filled using the `b
 
 Outputs:
 
-- `background_page_<page_id>.png` (one PNG per page)
-- `background_manifest.json`
+- `<skin_pack_name>/background_page_<page_id>.png` (one PNG per page)
+- (referenced from `gui_manifest.json`)
 
 By default, export sheets are packed as 512×512.
 

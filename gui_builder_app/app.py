@@ -1804,6 +1804,17 @@ class GuiBuilderApp:
         safe = self._safe_dir_name(str(name))
         return safe if safe != "skin" else "gui"
 
+    def _write_gui_manifest(self, gui_root: str, manifest: Dict[str, Any], *, quiet: bool = False) -> bool:
+        path = os.path.join(gui_root, "gui_manifest.json")
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(manifest, f, indent=2)
+        except Exception as e:
+            if not quiet:
+                messagebox.showerror("Export textures", f"Failed writing gui_manifest.json:\n{e}")
+            return False
+        return True
+
     def load_from_json_dict(self, data: dict) -> None:
         if not isinstance(data, dict):
             raise ValueError("Invalid JSON root (expected object).")
@@ -2199,7 +2210,48 @@ class GuiBuilderApp:
         # Keep exports grouped by skin pack name, even for single-pack export.
         skin_dir = os.path.join(gui_root, self._safe_dir_name(self._skin_pack_name))
         os.makedirs(skin_dir, exist_ok=True)
-        self._export_textures_to(skin_dir, group_by_size=group_by_size)
+
+        theme_dirname = os.path.basename(skin_dir)
+        res = self._export_textures_to(
+            skin_dir,
+            group_by_size=group_by_size,
+            quiet=True,
+            write_manifests=False,
+            path_prefix=f"{theme_dirname}/",
+        )
+        if res is None:
+            return
+
+        gui_manifest: Dict[str, Any] = {
+            "version": 1,
+            "gui_name": str(self._safe_gui_name(self.gui_name_var.get())),
+            "grid_n": int(self.grid_n),
+            "tile_px": int(TILE_PX),
+            "start_page_id": int(self.start_page_id),
+            "button_export_mode": "group_by_size" if group_by_size else "per_button",
+            "themes": {
+                str(res.get("skin_pack") or theme_dirname): {
+                    "buttons": res.get("buttons"),
+                    "backgrounds": res.get("backgrounds"),
+                }
+            },
+        }
+
+        if not self._write_gui_manifest(gui_root, gui_manifest):
+            return
+
+        export_lines = list(res.get("export_lines") or [])
+        export_lines.append("Manifest: gui_manifest.json")
+        self.set_status(" | ".join(export_lines))
+        messagebox.showinfo(
+            "Export textures",
+            "Export complete:\n\n"
+            + "\n".join(export_lines)
+            + "\n\nOutputs:\n"
+            + f"- {theme_dirname}/buttons_sheet_*.png\n"
+            + f"- {theme_dirname}/background_page_*.png\n"
+            + "- gui_manifest.json",
+        )
 
     def _ask_export_button_grouping(self) -> Optional[bool]:
         """Ask how button textures should be exported.
@@ -2225,6 +2277,8 @@ class GuiBuilderApp:
         *,
         group_by_size: bool = True,
         quiet: bool = False,
+        write_manifests: bool = True,
+        path_prefix: str = "",
     ) -> Optional[Dict[str, Any]]:
         """Export GUI textures for CustomNPCs.
 
@@ -2401,6 +2455,9 @@ class GuiBuilderApp:
                         )
 
         export_lines: List[str] = []
+
+        buttons_manifest: Optional[Dict[str, Any]] = None
+        backgrounds_manifest: Optional[Dict[str, Any]] = None
 
         # ----------------------------
         # 1) Buttons (assembled)
@@ -2589,14 +2646,23 @@ class GuiBuilderApp:
                         "h": row_h,
                     }
 
-            manifest_path = os.path.join(out_dir, "buttons_manifest.json")
-            try:
-                with open(manifest_path, "w", encoding="utf-8") as f:
-                    json.dump(manifest, f, indent=2)
-            except Exception as e:
-                if not quiet:
-                    messagebox.showerror("Export textures", f"Failed writing buttons_manifest.json:\n{e}")
-                return None
+            # Optionally prefix filenames so a single top-level manifest can reference per-theme outputs.
+            if path_prefix:
+                for sh in manifest.get("sheets", []):
+                    if isinstance(sh, dict) and isinstance(sh.get("filename"), str):
+                        sh["filename"] = f"{path_prefix}{sh['filename']}"
+
+            buttons_manifest = manifest
+
+            if write_manifests:
+                manifest_path = os.path.join(out_dir, "buttons_manifest.json")
+                try:
+                    with open(manifest_path, "w", encoding="utf-8") as f:
+                        json.dump(manifest, f, indent=2)
+                except Exception as e:
+                    if not quiet:
+                        messagebox.showerror("Export textures", f"Failed writing buttons_manifest.json:\n{e}")
+                    return None
 
             export_lines.append(
                 f"Buttons: {len(items)} unique blocks, {ref_uses} uses, {len(sheets)} sheet(s)"
@@ -2641,20 +2707,31 @@ class GuiBuilderApp:
         if bg_exported <= 0:
             export_lines.append("Backgrounds: none")
         else:
-            bg_manifest_path = os.path.join(out_dir, "background_manifest.json")
-            try:
-                with open(bg_manifest_path, "w", encoding="utf-8") as f:
-                    json.dump(bg_manifest, f, indent=2)
-            except Exception as e:
-                if not quiet:
-                    messagebox.showerror("Export textures", f"Failed writing background_manifest.json:\n{e}")
-                return None
+            # Optionally prefix filenames so a single top-level manifest can reference per-theme outputs.
+            if path_prefix:
+                pages = bg_manifest.get("pages")
+                if isinstance(pages, dict):
+                    for p in pages.values():
+                        if isinstance(p, dict) and isinstance(p.get("filename"), str):
+                            p["filename"] = f"{path_prefix}{p['filename']}"
+
+            backgrounds_manifest = bg_manifest
+
+            if write_manifests:
+                bg_manifest_path = os.path.join(out_dir, "background_manifest.json")
+                try:
+                    with open(bg_manifest_path, "w", encoding="utf-8") as f:
+                        json.dump(bg_manifest, f, indent=2)
+                except Exception as e:
+                    if not quiet:
+                        messagebox.showerror("Export textures", f"Failed writing background_manifest.json:\n{e}")
+                    return None
 
             export_lines.append(f"Backgrounds: {bg_exported} page(s)")
 
         self.set_status(" | ".join(export_lines))
 
-        if not quiet:
+        if (not quiet) and write_manifests:
             messagebox.showinfo(
                 "Export textures",
                 "Export complete:\n\n"
@@ -2667,6 +2744,8 @@ class GuiBuilderApp:
         return {
             "skin_pack": self._skin_pack_name,
             "export_lines": export_lines,
+            "buttons": buttons_manifest,
+            "backgrounds": backgrounds_manifest,
         }
 
     def export_all_skin_packs(self) -> None:
@@ -2695,6 +2774,7 @@ class GuiBuilderApp:
         previous = self._skin_pack_name
         ok = 0
         failed: List[str] = []
+        themes: Dict[str, Any] = {}
 
         try:
             for name in packs:
@@ -2703,24 +2783,54 @@ class GuiBuilderApp:
                 out_dir = os.path.join(gui_root, self._safe_dir_name(name))
                 os.makedirs(out_dir, exist_ok=True)
 
-                res = self._export_textures_to(out_dir, group_by_size=group_by_size, quiet=True)
+                theme_dirname = os.path.basename(out_dir)
+                res = self._export_textures_to(
+                    out_dir,
+                    group_by_size=group_by_size,
+                    quiet=True,
+                    write_manifests=False,
+                    path_prefix=f"{theme_dirname}/",
+                )
                 if res is None:
                     failed.append(name)
-                else:
-                    ok += 1
+                    continue
+
+                ok += 1
+                themes[str(name)] = {
+                    "buttons": res.get("buttons"),
+                    "backgrounds": res.get("backgrounds"),
+                }
         finally:
             # Restore previous selection.
             self._on_skin_pack_changed(previous)
 
+        if ok > 0:
+            gui_manifest: Dict[str, Any] = {
+                "version": 1,
+                "gui_name": str(self._safe_gui_name(self.gui_name_var.get())),
+                "grid_n": int(self.grid_n),
+                "tile_px": int(TILE_PX),
+                "start_page_id": int(self.start_page_id),
+                "button_export_mode": "group_by_size" if group_by_size else "per_button",
+                "themes": themes,
+            }
+
+            if not self._write_gui_manifest(gui_root, gui_manifest, quiet=True):
+                messagebox.showerror(
+                    "Export all skin packs",
+                    "Failed writing gui_manifest.json (PNG exports may still exist).",
+                )
+                return
+
         if failed:
             messagebox.showwarning(
                 "Export all skin packs",
-                f"Exported {ok}/{len(packs)} skin packs. Failed: {', '.join(failed)}",
+                f"Exported {ok}/{len(packs)} skin packs. Failed: {', '.join(failed)}\n\nWrote: {os.path.join(gui_root, 'gui_manifest.json')}",
             )
         else:
             messagebox.showinfo(
                 "Export all skin packs",
-                f"Exported {ok} skin packs into:\n{gui_root}",
+                f"Exported {ok} skin packs into:\n{gui_root}\n\nWrote: {os.path.join(gui_root, 'gui_manifest.json')}",
             )
 
     # ----------------------------
