@@ -32,13 +32,13 @@
             "y1": 8
           },
           "active": false,
-          "label": "License",
+          "label": "Take Insurance",
           "meta": {
             "hover": {
               "enabled": false,
               "text": ""
             },
-            "allow_hover": true
+            "allow_hover": false
           }
         },
         {
@@ -72,7 +72,7 @@
             "y1": 2
           },
           "active": false,
-          "label": "Trin Gramados dealership",
+          "label": "Seagull's Store",
           "meta": {
             "hover": {
               "enabled": false,
@@ -135,7 +135,7 @@
             },
             "hover": {
               "enabled": true,
-              "text": "Other Model"
+              "text": "Previous Item"
             },
             "allow_hover": true
           }
@@ -160,7 +160,7 @@
             },
             "hover": {
               "enabled": true,
-              "text": "Other Model"
+              "text": "Next Item"
             },
             "allow_hover": true
           }
@@ -214,7 +214,7 @@
             "y1": 2
           },
           "active": false,
-          "label": "Trin Gramados dealership",
+          "label": "Seagull's Store",
           "meta": {
             "hover": {
               "enabled": false,
@@ -234,7 +234,7 @@
             "y1": 6
           },
           "active": false,
-          "label": "",
+          "label": "Are you sure you want to purchase this item?",
           "meta": {
             "allow_hover": false,
             "hover": {
