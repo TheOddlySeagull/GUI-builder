@@ -116,6 +116,11 @@ Use:
 
 - **File → Export Textures…**
 
+When exporting, you can choose:
+
+- **Reuse one texture per button size** (default/current behavior)
+- **Export every button independently** (one unique texture per button entry)
+
 To export the same GUI textures for every detected skin pack:
 
 - **File → Export All Skin Packs…**

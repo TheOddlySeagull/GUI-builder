@@ -2175,12 +2175,40 @@ class GuiBuilderApp:
         return img
 
     def export_textures(self) -> None:
+        group_by_size = self._ask_export_button_grouping()
+        if group_by_size is None:
+            return
+
         out_dir = filedialog.askdirectory(title="Export textures folder")
         if not out_dir:
             return
-        self._export_textures_to(out_dir)
+        self._export_textures_to(out_dir, group_by_size=group_by_size)
 
-    def _export_textures_to(self, out_dir: str, *, quiet: bool = False) -> Optional[Dict[str, Any]]:
+    def _ask_export_button_grouping(self) -> Optional[bool]:
+        """Ask how button textures should be exported.
+
+        Returns:
+            True  -> group by size (current behavior: reuse one texture per size)
+            False -> export each button independently
+            None  -> user cancelled
+        """
+
+        return messagebox.askyesnocancel(
+            "Export textures",
+            "Button export mode:\n\n"
+            "Yes: Reuse one texture per button size (current)\n"
+            "No: Export every button independently\n\n"
+            "(This only affects exported button textures; backgrounds are unchanged.)",
+            default="yes",
+        )
+
+    def _export_textures_to(
+        self,
+        out_dir: str,
+        *,
+        group_by_size: bool = True,
+        quiet: bool = False,
+    ) -> Optional[Dict[str, Any]]:
         """Export GUI textures for CustomNPCs.
 
         - Buttons: exported as assembled textures, with hover directly beneath base.
@@ -2205,12 +2233,16 @@ class GuiBuilderApp:
             return None
 
         button_tools = (Tool.BUTTON_STANDARD, Tool.BUTTON_PRESS, Tool.BUTTON_TOGGLE)
-        # Build a set of unique packed blocks and a list of per-button references.
+        # Build a set of packed blocks and a list of per-button references.
+        #
+        # When group_by_size=True (default), blocks are deduplicated across buttons
+        # of the same size (current behavior). When False, each button gets its own
+        # exported block even if its size matches others.
         #
         # IMPORTANT: CustomNPCs hover texture is taken from directly beneath the base texture.
         # So we pack (base over hover) and (pressed over pressed_hover) as 2-row blocks.
         # (kind, top_module, bottom_module, w_tiles, h_tiles)
-        unique_blocks: Dict[Tuple[str, str, str, int, int], Dict[str, Any]] = {}
+        unique_blocks: Dict[Tuple[Any, ...], Dict[str, Any]] = {}
         refs: List[Dict[str, Any]] = []
 
         def _stack_pair(top: tk.PhotoImage, bottom: tk.PhotoImage) -> tk.PhotoImage:
@@ -2233,17 +2265,30 @@ class GuiBuilderApp:
                 w_tiles = int(r.width())
                 h_tiles = int(r.height())
 
+                uid = int(getattr(ent, "uid", 0) or 0)
+                entry_identity: Any = uid if uid > 0 else (int(pid), int(ent.entry_id))
+
                 # Unpressed pair (base + hover). If hover module is missing, fall back to base.
                 base_module = modules.get("base")
                 if base_module:
                     hover_module = modules.get("hover") or base_module
-                    unpressed_key: Tuple[str, str, str, int, int] = (
-                        "unpressed",
-                        str(base_module),
-                        str(hover_module),
-                        w_tiles,
-                        h_tiles,
-                    )
+                    if group_by_size:
+                        unpressed_key: Tuple[Any, ...] = (
+                            "unpressed",
+                            str(base_module),
+                            str(hover_module),
+                            w_tiles,
+                            h_tiles,
+                        )
+                    else:
+                        unpressed_key = (
+                            "unpressed",
+                            str(base_module),
+                            str(hover_module),
+                            w_tiles,
+                            h_tiles,
+                            entry_identity,
+                        )
                     if unpressed_key not in unique_blocks:
                         base_img = self._compose_entry_variant_image(atlas, ent, str(base_module))
                         hover_img = self._compose_entry_variant_image(atlas, ent, str(hover_module))
@@ -2264,7 +2309,7 @@ class GuiBuilderApp:
 
                     refs.append(
                         {
-                            "uid": int(getattr(ent, "uid", 0) or 0),
+                            "uid": uid,
                             "page_id": int(pid),
                             "entry_id": int(ent.entry_id),
                             "tool": ent.tool.value,
@@ -2279,13 +2324,23 @@ class GuiBuilderApp:
                 pressed_module = modules.get("pressed")
                 if pressed_module:
                     pressed_hover_module = modules.get("pressed_hover") or pressed_module
-                    pressed_key: Tuple[str, str, str, int, int] = (
-                        "pressed",
-                        str(pressed_module),
-                        str(pressed_hover_module),
-                        w_tiles,
-                        h_tiles,
-                    )
+                    if group_by_size:
+                        pressed_key: Tuple[Any, ...] = (
+                            "pressed",
+                            str(pressed_module),
+                            str(pressed_hover_module),
+                            w_tiles,
+                            h_tiles,
+                        )
+                    else:
+                        pressed_key = (
+                            "pressed",
+                            str(pressed_module),
+                            str(pressed_hover_module),
+                            w_tiles,
+                            h_tiles,
+                            entry_identity,
+                        )
                     if pressed_key not in unique_blocks:
                         pressed_img = self._compose_entry_variant_image(atlas, ent, str(pressed_module))
                         hover_img = self._compose_entry_variant_image(atlas, ent, str(pressed_hover_module))
@@ -2317,7 +2372,7 @@ class GuiBuilderApp:
                     else:
                         refs.append(
                             {
-                                "uid": int(getattr(ent, "uid", 0) or 0),
+                                "uid": uid,
                                 "page_id": int(pid),
                                 "entry_id": int(ent.entry_id),
                                 "tool": ent.tool.value,
@@ -2443,6 +2498,7 @@ class GuiBuilderApp:
                 "source_atlas": os.path.basename(atlas_path),
                 "tile_px": TILE_PX,
                 "sheet_px": max_px,
+                "button_export_mode": "group_by_size" if group_by_size else "per_button",
                 "sheets": [],
                 "buttons": {},
             }
@@ -2600,6 +2656,10 @@ class GuiBuilderApp:
         # Refresh list first so we export what's actually on disk.
         self._scan_skin_packs()
 
+        group_by_size = self._ask_export_button_grouping()
+        if group_by_size is None:
+            return
+
         packs = sorted(self._skin_pack_paths.keys())
         if not packs:
             messagebox.showinfo(
@@ -2623,7 +2683,7 @@ class GuiBuilderApp:
                 out_dir = os.path.join(base_out_dir, self._safe_dir_name(name))
                 os.makedirs(out_dir, exist_ok=True)
 
-                res = self._export_textures_to(out_dir, quiet=True)
+                res = self._export_textures_to(out_dir, group_by_size=group_by_size, quiet=True)
                 if res is None:
                     failed.append(name)
                 else:
