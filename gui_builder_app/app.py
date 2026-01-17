@@ -4,9 +4,11 @@ import json
 import os
 import shutil
 import sys
+import tempfile
 import tkinter as tk
+import zipfile
 from tkinter import filedialog, messagebox
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from .models import Entry, PageState, Rect, SQUARE_ONLY, Tool
 from .texture import TextureSheet
@@ -34,6 +36,10 @@ class GuiBuilderApp:
 
         # Name used as the top-level export folder (exports/<gui_name>/...).
         self.gui_name_var = tk.StringVar(value="unnamed_gui")
+
+        # Persistent user settings.
+        self._settings: Dict[str, Any] = {}
+        self._load_settings()
 
         # Optional texture sheet for preview rendering.
         self._texture_sheet: Optional[TextureSheet] = None
@@ -230,10 +236,168 @@ class GuiBuilderApp:
         filemenu.add_separator()
         filemenu.add_command(label="Export Textures...", command=self.export_textures)
         filemenu.add_command(label="Export All Skin Packs...", command=self.export_all_skin_packs)
+        filemenu.add_command(label="Inject into Texture Pack...", command=self.inject_into_texture_pack)
         filemenu.add_separator()
         filemenu.add_command(label="Quit", command=self.root.quit)
         menubar.add_cascade(label="File", menu=filemenu)
         self.root.config(menu=menubar)
+
+    def _settings_path(self) -> str:
+        return os.path.join(self._assets_base_dir(), ".gui_builder_settings.json")
+
+    def _load_settings(self) -> None:
+        try:
+            path = self._settings_path()
+            if os.path.exists(path):
+                with open(path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                if isinstance(data, dict):
+                    self._settings = data
+        except Exception:
+            self._settings = {}
+
+    def _save_settings(self) -> None:
+        try:
+            path = self._settings_path()
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(self._settings, f, indent=2)
+        except Exception:
+            # Non-fatal.
+            pass
+
+    def _safe_gui_folder_for_pack(self) -> str:
+        """Folder name for injection into a resource pack.
+
+        Requirement: lowercase, spaces -> underscore, and safe for Windows paths.
+        """
+
+        raw = str(self.gui_name_var.get() or "")
+        raw = raw.strip().lower().replace(" ", "_")
+        return self._safe_dir_name(raw)
+
+    def _zip_remove_prefix(self, zip_path: str, prefix: str) -> bool:
+        """Remove all entries whose name starts with prefix from a zip.
+
+        Zipfiles can't delete in-place; we rewrite the archive.
+        """
+
+        try:
+            prefix = prefix.replace("\\", "/")
+            if prefix and not prefix.endswith("/"):
+                prefix += "/"
+
+            tmp_path = f"{zip_path}.tmp"
+            with zipfile.ZipFile(zip_path, "r") as zin, zipfile.ZipFile(
+                tmp_path, "w", compression=zipfile.ZIP_DEFLATED
+            ) as zout:
+                for item in zin.infolist():
+                    name = item.filename
+                    if name.startswith(prefix):
+                        continue
+                    data = zin.read(name)
+                    zout.writestr(item, data)
+
+            os.replace(tmp_path, zip_path)
+            return True
+        except Exception:
+            try:
+                if os.path.exists(f"{zip_path}.tmp"):
+                    os.remove(f"{zip_path}.tmp")
+            except Exception:
+                pass
+            return False
+
+    def _export_component_sheets_with_writer(
+        self,
+        plan: Dict[str, Any],
+        *,
+        theme_rel_root: str,
+        write_png: Callable[[str, tk.PhotoImage], None],
+        quiet: bool = False,
+    ) -> bool:
+        """Export component sheets + backgrounds using a custom writer.
+
+        `theme_rel_root` is a forward-slash relative path prefix (e.g. ".../<skin_pack>").
+        `write_png(rel_path, image)` must write a PNG.
+        """
+
+        atlas_path = self._skin_pack_modules_path()
+        if not atlas_path or not os.path.exists(atlas_path):
+            if not quiet:
+                messagebox.showerror(
+                    "Export textures",
+                    "Missing skin pack modules.\n\n"
+                    "Create: skin_packs/<skin_name>/Modules.png (+ optional Background.png), then select it in the Skin Pack dropdown.",
+                )
+            return False
+
+        try:
+            atlas = tk.PhotoImage(file=atlas_path)
+        except Exception as e:
+            if not quiet:
+                messagebox.showerror("Export textures", f"Failed to load texture sheet:\n{e}")
+            return False
+
+        # Resolve representative entries for each block.
+        rep_map: Dict[Tuple[Any, ...], Entry] = {}
+        for bk, rep in (plan.get("block_key_to_rep") or {}).items():
+            try:
+                pid, entry_id = rep
+            except Exception:
+                continue
+            page = self.pages.get(int(pid))
+            if not page:
+                continue
+            ent = page.entries.get(int(entry_id))
+            if not ent:
+                continue
+            rep_map[bk] = ent
+
+        # Render sheets.
+        sheets = plan.get("sheets") or []
+        for sheet_idx, sh in enumerate(sheets):
+            sw = int(sh.get("w") or self.EXPORT_SHEET_PX)
+            shh = int(sh.get("h") or self.EXPORT_SHEET_PX)
+            sheet_img = tk.PhotoImage(width=sw, height=shh)
+
+            for pl in sh.get("placements", []):
+                bk = pl.get("block_key")
+                ent = rep_map.get(bk)
+                if ent is None:
+                    continue
+                block_img = self._compose_component_block(atlas, ent)
+                if block_img is None:
+                    continue
+                px = int(pl.get("x") or 0)
+                py = int(pl.get("y") or 0)
+                w = int(block_img.width())
+                h = int(block_img.height())
+                sheet_img.tk.call(sheet_img, "copy", block_img, "-from", 0, 0, w, h, "-to", px, py)
+
+            filename = f"sheet_{int(sheet_idx) + 1}.png"
+            rel = f"{theme_rel_root}/{filename}".replace("\\", "/")
+            try:
+                write_png(rel, sheet_img)
+            except Exception as e:
+                if not quiet:
+                    messagebox.showerror("Export textures", f"Failed writing {filename}:\n{e}")
+                return False
+
+        # Render backgrounds.
+        for pid in self._sorted_page_ids():
+            bg_img = self._render_flat_background_page(atlas, pid)
+            if bg_img is None:
+                continue
+            filename = f"background_page_{int(pid)}.png"
+            rel = f"{theme_rel_root}/{filename}".replace("\\", "/")
+            try:
+                write_png(rel, bg_img)
+            except Exception as e:
+                if not quiet:
+                    messagebox.showerror("Export textures", f"Failed writing {filename}:\n{e}")
+                return False
+
+        return True
 
     # ----------------------------
     # UI
@@ -1845,6 +2009,103 @@ class GuiBuilderApp:
             return False
         return True
 
+    def _ask_additional_skin_packs(self, *, default_pack: str, title: str) -> Optional[List[str]]:
+        """Ask the user which *additional* skin packs to export/inject.
+
+        The currently selected skin pack (default_pack) is always included automatically.
+
+        Returns:
+            List[str] -> selected additional pack names (can be empty)
+            None      -> user cancelled
+        """
+
+        # Refresh from disk so the list is up-to-date.
+        self._scan_skin_packs()
+
+        packs = sorted(self._skin_pack_paths.keys())
+        choices = [p for p in packs if p != default_pack]
+
+        if not choices:
+            return []
+
+        win = tk.Toplevel(self.root)
+        win.title(title)
+        win.transient(self.root)
+        win.grab_set()
+
+        result: Dict[str, Any] = {"ok": False}
+        vars_by_name: Dict[str, tk.BooleanVar] = {name: tk.BooleanVar(value=False) for name in choices}
+
+        tk.Label(
+            win,
+            text=(
+                "Select extra skin packs (optional).\n"
+                f"The selected skin pack is always included: {default_pack}"
+            ),
+            justify="left",
+        ).pack(anchor="w", padx=10, pady=(10, 6))
+
+        # Scrollable list, so it still works if there are many packs.
+        outer = tk.Frame(win)
+        outer.pack(fill="both", expand=True, padx=10)
+
+        canvas = tk.Canvas(outer, borderwidth=0, highlightthickness=0)
+        scrollbar = tk.Scrollbar(outer, orient="vertical", command=canvas.yview)
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        scrollbar.pack(side="right", fill="y")
+        canvas.pack(side="left", fill="both", expand=True)
+
+        inner = tk.Frame(canvas)
+        inner_id = canvas.create_window((0, 0), window=inner, anchor="nw")
+
+        def _on_inner_configure(_: tk.Event) -> None:
+            canvas.configure(scrollregion=canvas.bbox("all"))
+
+        def _on_canvas_configure(_: tk.Event) -> None:
+            # Keep inner frame width in sync with the canvas width.
+            canvas.itemconfigure(inner_id, width=canvas.winfo_width())
+
+        inner.bind("<Configure>", _on_inner_configure)
+        canvas.bind("<Configure>", _on_canvas_configure)
+
+        for name in choices:
+            tk.Checkbutton(inner, text=name, variable=vars_by_name[name]).pack(anchor="w", fill="x")
+
+        buttons = tk.Frame(win)
+        buttons.pack(fill="x", padx=10, pady=10)
+
+        def _select_all() -> None:
+            for v in vars_by_name.values():
+                v.set(True)
+
+        def _select_none() -> None:
+            for v in vars_by_name.values():
+                v.set(False)
+
+        def _ok() -> None:
+            result["ok"] = True
+            win.destroy()
+
+        def _cancel() -> None:
+            result["ok"] = False
+            win.destroy()
+
+        tk.Button(buttons, text="All", command=_select_all).pack(side="left")
+        tk.Button(buttons, text="None", command=_select_none).pack(side="left", padx=(6, 0))
+        tk.Button(buttons, text="Cancel", command=_cancel).pack(side="right")
+        tk.Button(buttons, text="OK", command=_ok).pack(side="right", padx=(0, 6))
+
+        win.protocol("WM_DELETE_WINDOW", _cancel)
+        win.minsize(360, 240)
+        self.root.wait_window(win)
+
+        if not result.get("ok"):
+            return None
+
+        selected = [name for name, v in vars_by_name.items() if bool(v.get())]
+        return selected
+
     def load_from_json_dict(self, data: dict) -> None:
         if not isinstance(data, dict):
             raise ValueError("Invalid JSON root (expected object).")
@@ -2517,92 +2778,197 @@ class GuiBuilderApp:
         }
 
     def _export_component_sheets_for_theme(self, theme_out_dir: str, plan: Dict[str, Any], *, quiet: bool = False) -> bool:
-        atlas_path = self._skin_pack_modules_path()
-        if not atlas_path or not os.path.exists(atlas_path):
-            if not quiet:
-                messagebox.showerror(
-                    "Export textures",
-                    "Missing skin pack modules.\n\n"
-                    "Create: skin_packs/<skin_name>/Modules.png (+ optional Background.png), then select it in the Skin Pack dropdown.",
-                )
-            return False
+        os.makedirs(theme_out_dir, exist_ok=True)
 
-        try:
-            atlas = tk.PhotoImage(file=atlas_path)
-        except Exception as e:
-            if not quiet:
-                messagebox.showerror("Export textures", f"Failed to load texture sheet:\n{e}")
-            return False
+        def _write(rel: str, img: tk.PhotoImage) -> None:
+            out_path = os.path.join(theme_out_dir, os.path.basename(rel))
+            img.write(out_path, format="png")
 
-        # Resolve representative entries for each block.
-        rep_map: Dict[Tuple[Any, ...], Entry] = {}
-        for bk, rep in (plan.get("block_key_to_rep") or {}).items():
-            try:
-                pid, entry_id = rep
-            except Exception:
-                continue
-            page = self.pages.get(int(pid))
-            if not page:
-                continue
-            ent = page.entries.get(int(entry_id))
-            if not ent:
-                continue
-            rep_map[bk] = ent
+        return self._export_component_sheets_with_writer(
+            plan,
+            theme_rel_root=".",
+            write_png=_write,
+            quiet=quiet,
+        )
 
-        sheets = plan.get("sheets") or []
-        placement_index = plan.get("placement_index") or {}
+    def inject_into_texture_pack(self) -> None:
+        """Export PNGs into a Minecraft resource pack (folder or zip).
 
-        # Render each sheet.
-        for sheet_idx, sh in enumerate(sheets):
-            sw = int(sh.get("w") or self.EXPORT_SHEET_PX)
-            shh = int(sh.get("h") or self.EXPORT_SHEET_PX)
-            sheet_img = tk.PhotoImage(width=sw, height=shh)
+        PNGs go under: assets/minecraft/textures/gui/gui_creator/<gui_name>/<skin_pack>/...
+        The GUI manifest JSON is saved separately to a user-chosen folder.
+        """
 
-            for pl in sh.get("placements", []):
-                bk = pl.get("block_key")
-                ent = rep_map.get(bk)
-                if ent is None:
-                    continue
-                block_img = self._compose_component_block(atlas, ent)
-                if block_img is None:
-                    continue
-                px = int(pl.get("x") or 0)
-                py = int(pl.get("y") or 0)
-                w = int(block_img.width())
-                h = int(block_img.height())
-                sheet_img.tk.call(sheet_img, "copy", block_img, "-from", 0, 0, w, h, "-to", px, py)
+        if self._skin_pack_name == "(none)":
+            messagebox.showerror(
+                "Inject into Texture Pack",
+                "No skin pack selected.\n\nSelect a Skin Pack in the left panel first.",
+            )
+            return
 
-            filename = f"sheet_{int(sheet_idx) + 1}.png"
-            out_path = os.path.join(theme_out_dir, filename)
-            try:
-                sheet_img.write(out_path, format="png")
-            except Exception as e:
-                if not quiet:
-                    messagebox.showerror("Export textures", f"Failed writing {filename}:\n{e}")
-                return False
-
-        # Export backgrounds (per page) into the same theme folder.
-        bg_exported = 0
-        for pid in self._sorted_page_ids():
-            bg_img = self._render_flat_background_page(atlas, pid)
-            if bg_img is None:
-                continue
-            filename = f"background_page_{int(pid)}.png"
-            out_path = os.path.join(theme_out_dir, filename)
-            try:
-                bg_img.write(out_path, format="png")
-            except Exception as e:
-                if not quiet:
-                    messagebox.showerror("Export textures", f"Failed writing {filename}:\n{e}")
-                return False
-            bg_exported += 1
-
-        return True
-
-    def export_textures(self) -> None:
         group_by_size = self._ask_export_button_grouping()
         if group_by_size is None:
             return
+
+        extra_packs = self._ask_additional_skin_packs(
+            default_pack=str(self._skin_pack_name),
+            title="Inject into Texture Pack",
+        )
+        if extra_packs is None:
+            return
+        packs_to_inject = [str(self._skin_pack_name)] + [p for p in extra_packs if p != str(self._skin_pack_name)]
+
+        pack_kind = messagebox.askyesnocancel(
+            "Inject into Texture Pack",
+            "Select resource pack type:\n\nYes: Folder\nNo: Zip (.zip)\nCancel: abort",
+            default="yes",
+        )
+        if pack_kind is None:
+            return
+
+        last_pack = str(self._settings.get("last_resource_pack_path") or "")
+        initial_dir = last_pack if os.path.isdir(last_pack) else (os.path.dirname(last_pack) if last_pack else "")
+
+        pack_path = ""
+        if pack_kind:
+            pack_path = filedialog.askdirectory(title="Select resource pack folder", initialdir=initial_dir)
+        else:
+            pack_path = filedialog.askopenfilename(
+                title="Select resource pack zip",
+                filetypes=[("Zip", "*.zip"), ("All files", "*.*")],
+                initialdir=initial_dir,
+            )
+
+        if not pack_path:
+            return
+
+        self._settings["last_resource_pack_path"] = pack_path
+        self._save_settings()
+
+        plan = self._plan_component_sheet_layout(group_buttons_by_size=bool(group_by_size))
+        if plan is None:
+            return
+
+        gui_folder = self._safe_gui_folder_for_pack()
+        base_prefix = f"assets/minecraft/textures/gui/gui_creator/{gui_folder}".replace("\\", "/")
+        previous_pack = self._skin_pack_name
+
+        def _pack_folder(name: str) -> str:
+            return self._safe_dir_name(str(name or "skin")).lower().replace(" ", "_")
+
+        # Writer that targets a folder pack.
+        if os.path.isdir(pack_path):
+            gui_dir = os.path.join(pack_path, *base_prefix.split("/"))
+            if not self._reset_export_dir(gui_dir, quiet=True):
+                messagebox.showerror("Inject into Texture Pack", f"Failed preparing pack folder:\n{gui_dir}")
+                return
+
+            # Ensure base gui dir exists.
+            os.makedirs(gui_dir, exist_ok=True)
+
+            def _write_png(rel: str, img: tk.PhotoImage) -> None:
+                out_path = os.path.join(pack_path, *rel.split("/"))
+                os.makedirs(os.path.dirname(out_path), exist_ok=True)
+                img.write(out_path, format="png")
+
+            try:
+                for pack_name in packs_to_inject:
+                    self._on_skin_pack_changed(pack_name)
+                    theme_prefix = f"{base_prefix}/{_pack_folder(pack_name)}".replace("\\", "/")
+                    if not self._export_component_sheets_with_writer(
+                        plan,
+                        theme_rel_root=theme_prefix,
+                        write_png=_write_png,
+                        quiet=False,
+                    ):
+                        return
+            finally:
+                self._on_skin_pack_changed(previous_pack)
+        else:
+            # Zip pack: remove existing gui folder prefix then append new files.
+            if not os.path.exists(pack_path):
+                messagebox.showerror("Inject into Texture Pack", f"Zip does not exist:\n{pack_path}")
+                return
+            if not self._zip_remove_prefix(pack_path, base_prefix):
+                messagebox.showerror("Inject into Texture Pack", f"Failed cleaning existing paths in zip:\n{base_prefix}")
+                return
+
+            with tempfile.TemporaryDirectory(prefix="gui_builder_zip_") as tmpdir:
+                def _write_png(rel: str, img: tk.PhotoImage) -> None:
+                    rel = rel.replace("\\", "/")
+                    tmp_path = os.path.join(tmpdir, *rel.split("/"))
+                    os.makedirs(os.path.dirname(tmp_path), exist_ok=True)
+                    img.write(tmp_path, format="png")
+
+                try:
+                    for pack_name in packs_to_inject:
+                        self._on_skin_pack_changed(pack_name)
+                        theme_prefix = f"{base_prefix}/{_pack_folder(pack_name)}".replace("\\", "/")
+                        if not self._export_component_sheets_with_writer(
+                            plan,
+                            theme_rel_root=theme_prefix,
+                            write_png=_write_png,
+                            quiet=False,
+                        ):
+                            return
+                finally:
+                    self._on_skin_pack_changed(previous_pack)
+
+                try:
+                    with zipfile.ZipFile(pack_path, "a", compression=zipfile.ZIP_DEFLATED) as zf:
+                        for root, _, files in os.walk(tmpdir):
+                            for fn in files:
+                                abs_path = os.path.join(root, fn)
+                                rel_path = os.path.relpath(abs_path, tmpdir).replace("\\", "/")
+                                zf.write(abs_path, arcname=rel_path)
+                except Exception as e:
+                    messagebox.showerror("Inject into Texture Pack", f"Failed writing to zip:\n{e}")
+                    return
+
+        # Manifest JSON saved separately.
+        base_out_dir = filedialog.askdirectory(title="Select folder to save gui_manifest.json")
+        if not base_out_dir:
+            return
+
+        gui_root = os.path.join(base_out_dir, self._safe_gui_name(self.gui_name_var.get()))
+        if not self._reset_export_dir(gui_root, quiet=False):
+            return
+
+        gui_manifest: Dict[str, Any] = {
+            "version": 2,
+            "skin_packs": packs_to_inject,
+            "components": plan.get("components") or [],
+        }
+        if not self._write_gui_manifest(gui_root, gui_manifest):
+            return
+
+        messagebox.showinfo(
+            "Inject into Texture Pack",
+            "Injection complete.\n\n"
+            + f"Pack: {pack_path}\n"
+            + f"Injected under: {base_prefix}/...\n"
+            + f"Skin packs: {', '.join(packs_to_inject)}\n\n"
+            + f"Manifest saved to: {os.path.join(gui_root, 'gui_manifest.json')}",
+        )
+
+    def export_textures(self) -> None:
+        if self._skin_pack_name == "(none)":
+            messagebox.showerror(
+                "Export textures",
+                "No skin pack selected.\n\nSelect a Skin Pack in the left panel first.",
+            )
+            return
+
+        group_by_size = self._ask_export_button_grouping()
+        if group_by_size is None:
+            return
+
+        extra_packs = self._ask_additional_skin_packs(
+            default_pack=str(self._skin_pack_name),
+            title="Export textures",
+        )
+        if extra_packs is None:
+            return
+        packs_to_export = [str(self._skin_pack_name)] + [p for p in extra_packs if p != str(self._skin_pack_name)]
 
         base_out_dir = filedialog.askdirectory(title="Export base folder")
         if not base_out_dir:
@@ -2617,29 +2983,43 @@ class GuiBuilderApp:
         if plan is None:
             return
 
-        # Keep exports grouped by skin pack name, even for single-pack export.
-        skin_dir = os.path.join(gui_root, self._safe_dir_name(self._skin_pack_name))
-        os.makedirs(skin_dir, exist_ok=True)
+        previous_pack = self._skin_pack_name
+        failed: List[str] = []
 
-        if not self._export_component_sheets_for_theme(skin_dir, plan, quiet=False):
+        try:
+            for pack_name in packs_to_export:
+                self._on_skin_pack_changed(pack_name)
+                # Keep exports grouped by skin pack name.
+                skin_dir = os.path.join(gui_root, self._safe_dir_name(pack_name))
+                os.makedirs(skin_dir, exist_ok=True)
+                if not self._export_component_sheets_for_theme(skin_dir, plan, quiet=False):
+                    failed.append(pack_name)
+        finally:
+            self._on_skin_pack_changed(previous_pack)
+
+        if failed:
+            messagebox.showwarning(
+                "Export textures",
+                "Export completed with errors.\n\nFailed skin packs:\n" + "\n".join(failed),
+            )
             return
 
         # Minimal, theme-independent manifest.
         gui_manifest: Dict[str, Any] = {
             "version": 2,
+            "skin_packs": packs_to_export,
             "components": plan.get("components") or [],
         }
 
         if not self._write_gui_manifest(gui_root, gui_manifest):
             return
 
-        theme_dirname = os.path.basename(skin_dir)
         self.set_status("Exported textures + gui_manifest.json")
         messagebox.showinfo(
             "Export textures",
             "Export complete.\n\nOutputs:\n"
-            + f"- {theme_dirname}/sheet_*.png\n"
-            + f"- {theme_dirname}/background_page_*.png\n"
+            + "- <skin_pack>/sheet_*.png\n"
+            + "- <skin_pack>/background_page_*.png\n"
             + "- gui_manifest.json",
         )
 
@@ -2696,6 +3076,7 @@ class GuiBuilderApp:
         # Minimal, theme-independent manifest.
         gui_manifest: Dict[str, Any] = {
             "version": 2,
+            "skin_packs": packs,
             "components": plan.get("components") or [],
         }
 

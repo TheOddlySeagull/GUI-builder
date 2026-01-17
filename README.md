@@ -119,6 +119,8 @@ Use:
 
 - **File → Export Textures…**
 
+The exporter will also prompt you to optionally select **additional skin packs** to export (in addition to the currently selected Skin Pack).
+
 Set **GUI Name** in the left panel before exporting.
 Exports will be written under:
 
@@ -130,6 +132,8 @@ Manifests are grouped into one file:
 
 - `/<export base folder>/<gui_name>/gui_manifest.json`
 
+The manifest includes a `skin_packs` list that tells you which skin packs were exported.
+
 When exporting, you can choose:
 
 - **Reuse one texture per button size** (default/current behavior)
@@ -138,6 +142,27 @@ When exporting, you can choose:
 To export the same GUI textures for every detected skin pack:
 
 - **File → Export All Skin Packs…**
+
+### Inject into a Minecraft resource pack
+
+Use:
+
+- **File → Inject into Texture Pack…**
+
+The injector will also prompt you to optionally select **additional skin packs** to inject (in addition to the currently selected Skin Pack).
+
+This lets you select either:
+
+- a resource pack **folder**, or
+- a resource pack **.zip**
+
+The exporter writes PNGs into the pack under:
+
+- `assets/minecraft/textures/gui/gui_creator/<gui_name>/<skin_pack_name>/...`
+
+Where `<gui_name>` is lowercased and spaces are replaced with `_`.
+
+Then it prompts you for a separate folder where `gui_manifest.json` will be saved.
 
 This export produces two outputs:
 
