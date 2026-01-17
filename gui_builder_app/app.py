@@ -2943,6 +2943,7 @@ class GuiBuilderApp:
         gui_manifest: Dict[str, Any] = {
             "version": 2,
             "gui_name": gui_folder,
+            "size": int(self.grid_n),
             "skin_packs": pack_folders_to_inject,
             "components": plan.get("components") or [],
         }
@@ -3018,6 +3019,7 @@ class GuiBuilderApp:
         gui_manifest: Dict[str, Any] = {
             "version": 2,
             "gui_name": gui_safe_name,
+            "size": int(self.grid_n),
             "skin_packs": pack_folders_to_export,
             "components": plan.get("components") or [],
         }
@@ -3090,6 +3092,7 @@ class GuiBuilderApp:
         gui_manifest: Dict[str, Any] = {
             "version": 2,
             "gui_name": gui_safe_name,
+            "size": int(self.grid_n),
             "skin_packs": pack_folders,
             "components": plan.get("components") or [],
         }

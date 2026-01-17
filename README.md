@@ -136,6 +136,11 @@ Manifests are grouped into one file:
 
 The manifest includes a `skin_packs` list that tells you which skin pack folders were exported (lowercase, no spaces).
 
+It also includes:
+
+- `gui_name`: the normalized GUI folder name used for export
+- `size`: `16` or `32` (grid size)
+
 When exporting, you can choose:
 
 - **Reuse one texture per button size** (default/current behavior)
