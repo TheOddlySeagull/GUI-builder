@@ -108,7 +108,7 @@
           "active": false,
           "label": "",
           "meta": {
-            "allow_hover": true,
+            "allow_hover": false,
             "hover": {
               "enabled": false,
               "text": ""
@@ -220,7 +220,7 @@
               "enabled": false,
               "text": ""
             },
-            "allow_hover": true
+            "allow_hover": false
           }
         },
         {
@@ -234,7 +234,7 @@
             "y1": 6
           },
           "active": false,
-          "label": "Are you sure you want to purchase this item?",
+          "label": "Are you sure you want to purchase this item? This action can't be undone.",
           "meta": {
             "allow_hover": false,
             "hover": {

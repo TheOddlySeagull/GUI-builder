@@ -3520,11 +3520,24 @@ class GuiBuilderApp:
                 x1 = self._canvas_offset_x + ((r.x1 + 1) * self.cell_px)
                 y1 = self._canvas_offset_y + ((r.y1 + 1) * self.cell_px)
 
+                # Text slots: wrap within the available rectangle instead of truncating.
+                if ent.tool == Tool.TEXT_SLOT and ent.label:
+                    wrap_w = max(1, int((x1 - x0) - 8))
+                    self.canvas.create_text(
+                        (x0 + x1) / 2,
+                        (y0 + y1) / 2,
+                        text=str(ent.label),
+                        fill="#ffffff",
+                        font=("TkDefaultFont", max(6, self.cell_px // 4)),
+                        justify="center",
+                        width=wrap_w,
+                    )
+                    return
+
                 label_lines: List[str] = []
                 if ent.label and ent.tool in (
                     Tool.TEXT_ENTRY,
                     Tool.SELECT_LIST,
-                    Tool.TEXT_SLOT,
                     Tool.BUTTON_STANDARD,
                     Tool.BUTTON_PRESS,
                     Tool.BUTTON_TOGGLE,
@@ -3572,6 +3585,21 @@ class GuiBuilderApp:
         self.canvas.create_rectangle(x0, y0, x1, y1, fill=fill, outline=outline, width=width)
 
         # Show tool name; also show label for text/select if any
+        if ent.tool == Tool.TEXT_SLOT and ent.label:
+            # Wrap label text inside the slot.
+            text = str(ent.label)
+            wrap_w = max(1, int((x1 - x0) - 8))
+            self.canvas.create_text(
+                (x0 + x1) / 2,
+                (y0 + y1) / 2,
+                text=text,
+                fill="#000000",
+                font=("TkDefaultFont", max(6, self.cell_px // 4)),
+                justify="center",
+                width=wrap_w,
+            )
+            return
+
         if ent.tool in (Tool.BUTTON_STANDARD, Tool.BUTTON_PRESS, Tool.BUTTON_TOGGLE) and ent.label:
             label_lines = [ent.label[:24]]
         else:
