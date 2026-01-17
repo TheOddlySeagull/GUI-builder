@@ -126,13 +126,15 @@ Exports will be written under:
 
 - `/<export base folder>/<gui_name>/<skin_pack_name>/...`
 
+Note: exported skin pack folder names are normalized (lowercase, spaces replaced with `_`).
+
 If the `/<export base folder>/<gui_name>/` folder already exists, its contents are cleared and replaced by the new export.
 
 Manifests are grouped into one file:
 
 - `/<export base folder>/<gui_name>/gui_manifest.json`
 
-The manifest includes a `skin_packs` list that tells you which skin packs were exported.
+The manifest includes a `skin_packs` list that tells you which skin pack folders were exported (lowercase, no spaces).
 
 When exporting, you can choose:
 
@@ -159,6 +161,8 @@ This lets you select either:
 The exporter writes PNGs into the pack under:
 
 - `assets/minecraft/textures/gui/gui_creator/<gui_name>/<skin_pack_name>/...`
+
+Note: injected skin pack folder names are normalized (lowercase, spaces replaced with `_`).
 
 Where `<gui_name>` is lowercased and spaces are replaced with `_`.
 

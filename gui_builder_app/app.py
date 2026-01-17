@@ -275,6 +275,15 @@ class GuiBuilderApp:
         raw = raw.strip().lower().replace(" ", "_")
         return self._safe_dir_name(raw)
 
+    def _skin_pack_folder_name(self, pack_name: str) -> str:
+        """Normalize a skin pack name to the folder name used for outputs.
+
+        Requirement: lowercase, no spaces (spaces -> underscore), and safe for Windows paths.
+        """
+
+        raw = str(pack_name or "skin").strip().lower().replace(" ", "_")
+        return self._safe_dir_name(raw)
+
     def _zip_remove_prefix(self, zip_path: str, prefix: str) -> bool:
         """Remove all entries whose name starts with prefix from a zip.
 
@@ -2816,6 +2825,7 @@ class GuiBuilderApp:
         if extra_packs is None:
             return
         packs_to_inject = [str(self._skin_pack_name)] + [p for p in extra_packs if p != str(self._skin_pack_name)]
+        pack_folders_to_inject = [self._skin_pack_folder_name(p) for p in packs_to_inject]
 
         pack_kind = messagebox.askyesnocancel(
             "Inject into Texture Pack",
@@ -2852,9 +2862,6 @@ class GuiBuilderApp:
         base_prefix = f"assets/minecraft/textures/gui/gui_creator/{gui_folder}".replace("\\", "/")
         previous_pack = self._skin_pack_name
 
-        def _pack_folder(name: str) -> str:
-            return self._safe_dir_name(str(name or "skin")).lower().replace(" ", "_")
-
         # Writer that targets a folder pack.
         if os.path.isdir(pack_path):
             gui_dir = os.path.join(pack_path, *base_prefix.split("/"))
@@ -2873,7 +2880,7 @@ class GuiBuilderApp:
             try:
                 for pack_name in packs_to_inject:
                     self._on_skin_pack_changed(pack_name)
-                    theme_prefix = f"{base_prefix}/{_pack_folder(pack_name)}".replace("\\", "/")
+                    theme_prefix = f"{base_prefix}/{self._skin_pack_folder_name(pack_name)}".replace("\\", "/")
                     if not self._export_component_sheets_with_writer(
                         plan,
                         theme_rel_root=theme_prefix,
@@ -2902,7 +2909,7 @@ class GuiBuilderApp:
                 try:
                     for pack_name in packs_to_inject:
                         self._on_skin_pack_changed(pack_name)
-                        theme_prefix = f"{base_prefix}/{_pack_folder(pack_name)}".replace("\\", "/")
+                        theme_prefix = f"{base_prefix}/{self._skin_pack_folder_name(pack_name)}".replace("\\", "/")
                         if not self._export_component_sheets_with_writer(
                             plan,
                             theme_rel_root=theme_prefix,
@@ -2935,7 +2942,8 @@ class GuiBuilderApp:
 
         gui_manifest: Dict[str, Any] = {
             "version": 2,
-            "skin_packs": packs_to_inject,
+            "gui_name": gui_folder,
+            "skin_packs": pack_folders_to_inject,
             "components": plan.get("components") or [],
         }
         if not self._write_gui_manifest(gui_root, gui_manifest):
@@ -2946,7 +2954,7 @@ class GuiBuilderApp:
             "Injection complete.\n\n"
             + f"Pack: {pack_path}\n"
             + f"Injected under: {base_prefix}/...\n"
-            + f"Skin packs: {', '.join(packs_to_inject)}\n\n"
+            + f"Skin packs: {', '.join(pack_folders_to_inject)}\n\n"
             + f"Manifest saved to: {os.path.join(gui_root, 'gui_manifest.json')}",
         )
 
@@ -2969,12 +2977,14 @@ class GuiBuilderApp:
         if extra_packs is None:
             return
         packs_to_export = [str(self._skin_pack_name)] + [p for p in extra_packs if p != str(self._skin_pack_name)]
+        pack_folders_to_export = [self._skin_pack_folder_name(p) for p in packs_to_export]
 
         base_out_dir = filedialog.askdirectory(title="Export base folder")
         if not base_out_dir:
             return
 
-        gui_root = os.path.join(base_out_dir, self._safe_gui_name(self.gui_name_var.get()))
+        gui_safe_name = self._safe_gui_name(self.gui_name_var.get())
+        gui_root = os.path.join(base_out_dir, gui_safe_name)
         if not self._reset_export_dir(gui_root, quiet=False):
             return
 
@@ -2990,7 +3000,7 @@ class GuiBuilderApp:
             for pack_name in packs_to_export:
                 self._on_skin_pack_changed(pack_name)
                 # Keep exports grouped by skin pack name.
-                skin_dir = os.path.join(gui_root, self._safe_dir_name(pack_name))
+                skin_dir = os.path.join(gui_root, self._skin_pack_folder_name(pack_name))
                 os.makedirs(skin_dir, exist_ok=True)
                 if not self._export_component_sheets_for_theme(skin_dir, plan, quiet=False):
                     failed.append(pack_name)
@@ -3007,7 +3017,8 @@ class GuiBuilderApp:
         # Minimal, theme-independent manifest.
         gui_manifest: Dict[str, Any] = {
             "version": 2,
-            "skin_packs": packs_to_export,
+            "gui_name": gui_safe_name,
+            "skin_packs": pack_folders_to_export,
             "components": plan.get("components") or [],
         }
 
@@ -3050,6 +3061,7 @@ class GuiBuilderApp:
             return
 
         packs = sorted(self._skin_pack_paths.keys())
+        pack_folders = [self._skin_pack_folder_name(p) for p in packs]
         if not packs:
             messagebox.showinfo(
                 "Export all skin packs",
@@ -3061,7 +3073,8 @@ class GuiBuilderApp:
         if not base_out_dir:
             return
 
-        gui_root = os.path.join(base_out_dir, self._safe_gui_name(self.gui_name_var.get()))
+        gui_safe_name = self._safe_gui_name(self.gui_name_var.get())
+        gui_root = os.path.join(base_out_dir, gui_safe_name)
         if not self._reset_export_dir(gui_root, quiet=True):
             messagebox.showerror(
                 "Export all skin packs",
@@ -3076,7 +3089,8 @@ class GuiBuilderApp:
         # Minimal, theme-independent manifest.
         gui_manifest: Dict[str, Any] = {
             "version": 2,
-            "skin_packs": packs,
+            "gui_name": gui_safe_name,
+            "skin_packs": pack_folders,
             "components": plan.get("components") or [],
         }
 
@@ -3094,7 +3108,7 @@ class GuiBuilderApp:
         try:
             for name in packs:
                 self._on_skin_pack_changed(name)
-                out_dir = os.path.join(gui_root, self._safe_dir_name(name))
+                out_dir = os.path.join(gui_root, self._skin_pack_folder_name(name))
                 os.makedirs(out_dir, exist_ok=True)
 
                 if not self._export_component_sheets_for_theme(out_dir, plan, quiet=True):
