@@ -5,3 +5,4 @@ skin_pack_sources/*
 exports/*
 .gui_builder_settings.json
 examples/private/*
+ecmascript_gramados/*

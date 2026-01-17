@@ -10,18 +10,35 @@ import zipfile
 from tkinter import filedialog, messagebox
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from .models import Entry, PageState, Rect, SQUARE_ONLY, Tool
-from .texture import TextureSheet
-from .texture_mapping import (
-    CTM_DIRS,
-    CTM_ORIGINS,
-    ENTRY_TOOL_MODULES,
-    BACKGROUND_FILENAME,
-    MODULES_FILENAME,
-    SKIN_PACKS_DIRNAME,
-    TILE_PX,
-    ctm_tile_offset,
-)
+try:
+    # Package import (normal): run via gui_builder.py
+    from .models import Entry, PageState, Rect, SQUARE_ONLY, Tool
+    from .texture import TextureSheet
+    from .texture_mapping import (
+        CTM_DIRS,
+        CTM_ORIGINS,
+        ENTRY_TOOL_MODULES,
+        BACKGROUND_FILENAME,
+        MODULES_FILENAME,
+        SKIN_PACKS_DIRNAME,
+        TILE_PX,
+        ctm_tile_offset,
+    )
+except ImportError:
+    # Allow running this file directly for quick debugging:
+    #   python gui_builder_app/app.py
+    from gui_builder_app.models import Entry, PageState, Rect, SQUARE_ONLY, Tool
+    from gui_builder_app.texture import TextureSheet
+    from gui_builder_app.texture_mapping import (
+        CTM_DIRS,
+        CTM_ORIGINS,
+        ENTRY_TOOL_MODULES,
+        BACKGROUND_FILENAME,
+        MODULES_FILENAME,
+        SKIN_PACKS_DIRNAME,
+        TILE_PX,
+        ctm_tile_offset,
+    )
 
 
 class GuiBuilderApp:
@@ -129,9 +146,6 @@ class GuiBuilderApp:
         self._drag_end: Optional[Tuple[int, int]] = None
         self._drag_mode: Optional[str] = None  # editor: "place"/"erase"/"paint_on"/"paint_off"
 
-        # Preview interaction state
-        self._preview_pressed_entry_id: Optional[int] = None  # for press buttons held down
-
         self._build_menu()
         self._build_ui()
         self._bind_events()
@@ -193,9 +207,6 @@ class GuiBuilderApp:
         # When loading a page, deactivate any non-toggle buttons.
         self._deactivate_non_toggle_buttons(self.current_page_id)
 
-        # Clear any held press interaction when switching pages.
-        self._preview_pressed_entry_id = None
-
         # Clear hover state when switching pages.
         self._preview_hover_entry_id = None
 
@@ -207,7 +218,7 @@ class GuiBuilderApp:
         if not page:
             return
         for ent in page.entries.values():
-            if ent.tool in (Tool.BUTTON_STANDARD, Tool.BUTTON_PRESS):
+            if ent.tool == Tool.BUTTON_STANDARD:
                 ent.active = False
 
     def goto_prev_page(self) -> None:
@@ -858,7 +869,7 @@ class GuiBuilderApp:
 
         self.sel_hover_enabled_var = tk.BooleanVar(value=False)
         self.sel_hover_text_var = tk.StringVar(value="")
-        self.sel_allow_hover_var = tk.BooleanVar(value=True)
+        self.sel_locked_var = tk.BooleanVar(value=False)
         self.sel_label_var = tk.StringVar(value="")
 
         def apply_selected_meta() -> None:
@@ -866,7 +877,7 @@ class GuiBuilderApp:
             if not ent:
                 return
             meta = ent.meta if isinstance(ent.meta, dict) else {}
-            meta["allow_hover"] = bool(self.sel_allow_hover_var.get())
+            meta["locked"] = bool(self.sel_locked_var.get())
             meta["hover"] = {
                 "enabled": bool(self.sel_hover_enabled_var.get()),
                 "text": str(self.sel_hover_text_var.get()),
@@ -879,15 +890,14 @@ class GuiBuilderApp:
                 Tool.TEXT_ENTRY,
                 Tool.SELECT_LIST,
                 Tool.BUTTON_STANDARD,
-                Tool.BUTTON_PRESS,
                 Tool.BUTTON_TOGGLE,
             ):
                 ent.label = str(self.sel_label_var.get())
 
         tk.Checkbutton(
             self.selection_frame,
-            text="Allow hover texture",
-            variable=self.sel_allow_hover_var,
+            text="Locked",
+            variable=self.sel_locked_var,
             command=apply_selected_meta,
             anchor="w",
             justify="left",
@@ -1268,7 +1278,7 @@ class GuiBuilderApp:
             self.selected_info_var.set("(none)")
             self.sel_hover_enabled_var.set(False)
             self.sel_hover_text_var.set("")
-            self.sel_allow_hover_var.set(True)
+            self.sel_locked_var.set(False)
             if hasattr(self, "sel_label_var"):
                 self.sel_label_var.set("")
             if hasattr(self, "sel_label_frame") and self.sel_label_frame.winfo_ismapped():
@@ -1289,7 +1299,7 @@ class GuiBuilderApp:
         else:
             self.selected_info_var.set(f"ID {ent.entry_id} | {ent.tool.value}")
         meta = ent.meta if isinstance(ent.meta, dict) else {}
-        self.sel_allow_hover_var.set(bool(meta.get("allow_hover", True)))
+        self.sel_locked_var.set(bool(meta.get("locked", False)))
         hover = meta.get("hover")
         if not isinstance(hover, dict):
             hover = {"enabled": False, "text": ""}
@@ -1303,7 +1313,6 @@ class GuiBuilderApp:
                 Tool.TEXT_ENTRY,
                 Tool.SELECT_LIST,
                 Tool.BUTTON_STANDARD,
-                Tool.BUTTON_PRESS,
                 Tool.BUTTON_TOGGLE,
             ):
                 if not self.sel_label_frame.winfo_ismapped():
@@ -1318,7 +1327,7 @@ class GuiBuilderApp:
                 elif ent.tool == Tool.TEXT_ENTRY:
                     self.sel_label_title.configure(text="Text Entry Value")
                     self.sel_label_hint.configure(text="Current input value (preview/demo). Independent from hover text.")
-                elif ent.tool in (Tool.BUTTON_STANDARD, Tool.BUTTON_PRESS, Tool.BUTTON_TOGGLE):
+                elif ent.tool in (Tool.BUTTON_STANDARD, Tool.BUTTON_TOGGLE):
                     self.sel_label_title.configure(text="Button Text")
                     self.sel_label_hint.configure(text="Shown on the button. Independent from hover text.")
                 else:
@@ -1383,7 +1392,7 @@ class GuiBuilderApp:
         if custom:
             return custom
 
-        if ent.tool in (Tool.BUTTON_STANDARD, Tool.BUTTON_PRESS, Tool.BUTTON_TOGGLE):
+        if ent.tool in (Tool.BUTTON_STANDARD, Tool.BUTTON_TOGGLE):
             return self._format_button_hover_details(ent)
 
         if ent.tool == Tool.TEXT_ENTRY:
@@ -1401,18 +1410,15 @@ class GuiBuilderApp:
         if ent.tool == Tool.BUTTON_TOGGLE:
             return f"Toggle: {'ON' if ent.active else 'OFF'}"
 
-        if ent.tool == Tool.BUTTON_PRESS:
-            return "Press: hold while mouse down"
-
         if ent.tool == Tool.BUTTON_STANDARD:
             meta = ent.meta if isinstance(ent.meta, dict) else {}
             page_change = meta.get("page_change")
-            if mode == "close":
-                return "Standard: action=close_gui"
             if not isinstance(page_change, dict):
                 return "Standard: action=none"
 
             mode = str(page_change.get("mode", "none"))
+            if mode == "close":
+                return "Standard: action=close_gui"
             modulo = bool(page_change.get("modulo", False))
             wrap_txt = "wrap" if modulo else "no-wrap"
 
@@ -1545,7 +1551,7 @@ class GuiBuilderApp:
         # New entries default to: allow hover textures, but no hover tooltip text.
         if self.current_tool != Tool.BACKGROUND:
             meta = ent.meta if isinstance(ent.meta, dict) else {}
-            meta.setdefault("allow_hover", True)
+            meta.setdefault("locked", False)
             meta.setdefault("hover", {"enabled": False, "text": ""})
             ent.meta = meta
         self.entries[eid] = ent
@@ -1580,12 +1586,6 @@ class GuiBuilderApp:
                 140,
                 lambda pid=source_page_id, eid=ent.entry_id: self._preview_deactivate_if_exists(pid, eid),
             )
-
-        elif ent.tool == Tool.BUTTON_PRESS:
-            ent.active = True
-            self._preview_pressed_entry_id = ent.entry_id
-            self.set_status(f"Preview: press button {ent.entry_id} DOWN")
-
         elif ent.tool == Tool.BUTTON_TOGGLE:
             ent.active = not ent.active
             self.set_status(f"Preview: toggle button {ent.entry_id} => {ent.active}")
@@ -1651,15 +1651,7 @@ class GuiBuilderApp:
         self.goto_page(ids[new_idx])
 
     def _preview_handle_release(self, cx: int, cy: int) -> None:
-        # release press button if it was held
-        if self._preview_pressed_entry_id is None:
-            return
-        ent = self.entries.get(self._preview_pressed_entry_id)
-        if ent and ent.tool == Tool.BUTTON_PRESS:
-            ent.active = False
-            self.set_status(f"Preview: press button {ent.entry_id} UP")
-        self._preview_pressed_entry_id = None
-        self.redraw()
+        return
 
     def _preview_deactivate_if_exists(self, page_id: int, entry_id: int) -> None:
         page = self.pages.get(page_id)
@@ -2151,33 +2143,30 @@ class GuiBuilderApp:
         """Return a small state label for picking tiles."""
         hovered_raw = self.preview_mode and (self._preview_hover_entry_id == ent.entry_id)
         meta = ent.meta if isinstance(ent.meta, dict) else {}
-        allow_hover = bool(meta.get("allow_hover", True))
-        hovered = hovered_raw and allow_hover
+        locked = bool(meta.get("locked", False))
+        disabled = bool(meta.get("disabled", False))
+        hovered = hovered_raw and (not locked) and (not disabled)
 
-        if ent.tool in (Tool.BUTTON_STANDARD, Tool.BUTTON_TOGGLE, Tool.BUTTON_PRESS):
-            pressed = False
-            if ent.tool == Tool.BUTTON_PRESS:
-                pressed = (self._preview_pressed_entry_id == ent.entry_id) or bool(ent.active)
-            elif ent.tool == Tool.BUTTON_TOGGLE:
-                pressed = bool(ent.active)
-            elif ent.tool == Tool.BUTTON_STANDARD:
-                pressed = bool(ent.active)
-
-            if pressed and hovered:
-                return "button_pressed_hover"
-            if pressed:
-                return "button_pressed"
-            if hovered:
-                return "button_hover"
-            return "button_unpressed"
-
-        if ent.tool == Tool.TEXT_SLOT:
+        # Buttons are the only widgets that support hover textures.
+        if ent.tool == Tool.BUTTON_STANDARD:
             mapping = ENTRY_TOOL_MODULES.get(ent.tool, {})
-            return mapping.get("hover" if hovered else "base", "")
+            if locked:
+                return str(mapping.get("locked") or mapping.get("base") or "")
+            return str(mapping.get("hover" if hovered else "base") or "")
 
-        mapping = ENTRY_TOOL_MODULES.get(ent.tool)
-        if mapping:
-            return mapping.get("hover" if hovered else "base", "")
+        if ent.tool == Tool.BUTTON_TOGGLE:
+            mapping = ENTRY_TOOL_MODULES.get(ent.tool, {})
+            if disabled:
+                return str(mapping.get("disabled") or mapping.get("base") or "")
+            if bool(ent.active):
+                return str(mapping.get("on") or mapping.get("pressed") or mapping.get("base") or "")
+            return str(mapping.get("hover" if hovered else "base") or "")
+
+        # Non-buttons: no hover variants. (Optional locked variant via meta.)
+        mapping = ENTRY_TOOL_MODULES.get(ent.tool) or {}
+        if locked:
+            return str(mapping.get("locked") or mapping.get("base") or "")
+        return str(mapping.get("base") or "")
 
         # Everything else falls back to color rendering for now.
         return ""
@@ -2564,7 +2553,16 @@ class GuiBuilderApp:
 
             max_id = 0
             for obj in entries:
-                tool = Tool(obj["tool"])
+                raw_tool = str(obj.get("tool") or "")
+                if raw_tool == "button_press":
+                    # Deprecated tool (removed): treat as a standard button.
+                    tool = Tool.BUTTON_STANDARD
+                else:
+                    try:
+                        tool = Tool(raw_tool)
+                    except Exception:
+                        # Skip unknown tools.
+                        continue
                 r = obj["rect"]
                 rect = Rect(int(r["x0"]), int(r["y0"]), int(r["x1"]), int(r["y1"]))
                 rect = rect.normalized()
@@ -2816,7 +2814,7 @@ class GuiBuilderApp:
 
         # Fill where buttons should sit (so the baked background doesn't look empty).
         # IMPORTANT: render each button separately to avoid CTM connections between distinct buttons.
-        button_tools = {Tool.BUTTON_STANDARD, Tool.BUTTON_PRESS, Tool.BUTTON_TOGGLE}
+        button_tools = {Tool.BUTTON_STANDARD, Tool.BUTTON_TOGGLE}
         for ent in page.entries.values():
             if ent.tool not in button_tools:
                 continue
@@ -2849,8 +2847,6 @@ class GuiBuilderApp:
             return "button"
         if tool == Tool.BUTTON_TOGGLE:
             return "toggle_button"
-        if tool == Tool.BUTTON_PRESS:
-            return "press_button"
         if tool == Tool.TEXT_SLOT:
             return "label"
         if tool == Tool.TEXT_ENTRY:
@@ -2876,7 +2872,7 @@ class GuiBuilderApp:
             return False
 
         # Only buttons are exported as separate textures.
-        if ent.tool not in (Tool.BUTTON_STANDARD, Tool.BUTTON_PRESS, Tool.BUTTON_TOGGLE):
+        if ent.tool not in (Tool.BUTTON_STANDARD, Tool.BUTTON_TOGGLE):
             return False
 
         modules = ENTRY_TOOL_MODULES.get(ent.tool) or {}
@@ -2885,31 +2881,27 @@ class GuiBuilderApp:
             return False
 
         # Toggle buttons need a dedicated texture block even if the atlas variants
-        # are identical, because the consumer expects both OFF and ON textures.
+        # are identical, because the consumer expects OFF/ON/(optional) DISABLED textures.
         if ent.tool == Tool.BUTTON_TOGGLE:
             return True
 
-        # Other buttons: export if any non-base module is mapped.
-        hover_module = modules.get("hover")
-        pressed_module = modules.get("pressed")
-        pressed_hover_module = modules.get("pressed_hover")
-
+        # Standard buttons: export if any non-base module is mapped.
         base = str(base_module)
         return any(
             (m is not None and str(m) != base)
-            for m in (hover_module, pressed_module, pressed_hover_module)
+            for m in (modules.get("hover"), modules.get("locked"))
         )
 
     def _compose_component_block(self, atlas: tk.PhotoImage, ent: Entry) -> Optional[tk.PhotoImage]:
         """Compose a 2x2 texture block for a component.
 
         Layout (each cell is the component's own w*h in pixels):
-        - top-left: base
-        - bottom-left: hover
-        - top-right: pressed
-        - bottom-right: pressed_hover
+        - Standard button: base | locked
+                         hover | locked_hover (usually same as locked)
+        - Toggle button:   off  | on
+                         hover | disabled
 
-        Missing variants fall back to base/pressed so the JS can use a consistent layout.
+        Missing variants fall back to base so the JS can use a consistent layout.
         """
 
         modules = ENTRY_TOOL_MODULES.get(ent.tool) or {}
@@ -2917,24 +2909,60 @@ class GuiBuilderApp:
         if not base_module:
             return None
 
-        hover_module = modules.get("hover") or base_module
-        pressed_module = modules.get("pressed") or base_module
-        pressed_hover_module = modules.get("pressed_hover") or pressed_module
+        if ent.tool == Tool.BUTTON_STANDARD:
+            hover_module = modules.get("hover") or base_module
+            locked_module = modules.get("locked") or base_module
+            locked_hover_module = modules.get("locked_hover") or locked_module
 
+            base_img = self._compose_entry_variant_image(atlas, ent, str(base_module))
+            if base_img is None:
+                return None
+            hover_img = self._compose_entry_variant_image(atlas, ent, str(hover_module)) or base_img
+            locked_img = self._compose_entry_variant_image(atlas, ent, str(locked_module)) or base_img
+            locked_hover_img = self._compose_entry_variant_image(atlas, ent, str(locked_hover_module)) or locked_img
+
+            w = int(base_img.width())
+            h = int(base_img.height())
+            out = tk.PhotoImage(width=w * 2, height=h * 2)
+            out.tk.call(out, "copy", base_img, "-from", 0, 0, w, h, "-to", 0, 0)
+            out.tk.call(out, "copy", hover_img, "-from", 0, 0, w, h, "-to", 0, h)
+            out.tk.call(out, "copy", locked_img, "-from", 0, 0, w, h, "-to", w, 0)
+            out.tk.call(out, "copy", locked_hover_img, "-from", 0, 0, w, h, "-to", w, h)
+            return out
+
+        if ent.tool == Tool.BUTTON_TOGGLE:
+            hover_module = modules.get("hover") or base_module
+            on_module = modules.get("on") or modules.get("pressed") or base_module
+            disabled_module = modules.get("disabled") or modules.get("pressed_hover") or on_module
+
+            off_img = self._compose_entry_variant_image(atlas, ent, str(base_module))
+            if off_img is None:
+                return None
+            hover_img = self._compose_entry_variant_image(atlas, ent, str(hover_module)) or off_img
+            on_img = self._compose_entry_variant_image(atlas, ent, str(on_module)) or off_img
+            disabled_img = self._compose_entry_variant_image(atlas, ent, str(disabled_module)) or on_img
+
+            w = int(off_img.width())
+            h = int(off_img.height())
+            out = tk.PhotoImage(width=w * 2, height=h * 2)
+            out.tk.call(out, "copy", off_img, "-from", 0, 0, w, h, "-to", 0, 0)
+            out.tk.call(out, "copy", hover_img, "-from", 0, 0, w, h, "-to", 0, h)
+            out.tk.call(out, "copy", on_img, "-from", 0, 0, w, h, "-to", w, 0)
+            out.tk.call(out, "copy", disabled_img, "-from", 0, 0, w, h, "-to", w, h)
+            return out
+
+        # Shouldn't be reached: non-buttons are baked into backgrounds.
         base_img = self._compose_entry_variant_image(atlas, ent, str(base_module))
         if base_img is None:
             return None
-        hover_img = self._compose_entry_variant_image(atlas, ent, str(hover_module)) or base_img
-        pressed_img = self._compose_entry_variant_image(atlas, ent, str(pressed_module)) or base_img
-        pressed_hover_img = self._compose_entry_variant_image(atlas, ent, str(pressed_hover_module)) or pressed_img
 
         w = int(base_img.width())
         h = int(base_img.height())
         out = tk.PhotoImage(width=w * 2, height=h * 2)
         out.tk.call(out, "copy", base_img, "-from", 0, 0, w, h, "-to", 0, 0)
-        out.tk.call(out, "copy", hover_img, "-from", 0, 0, w, h, "-to", 0, h)
-        out.tk.call(out, "copy", pressed_img, "-from", 0, 0, w, h, "-to", w, 0)
-        out.tk.call(out, "copy", pressed_hover_img, "-from", 0, 0, w, h, "-to", w, h)
+        out.tk.call(out, "copy", base_img, "-from", 0, 0, w, h, "-to", 0, h)
+        out.tk.call(out, "copy", base_img, "-from", 0, 0, w, h, "-to", w, 0)
+        out.tk.call(out, "copy", base_img, "-from", 0, 0, w, h, "-to", w, h)
         return out
 
     def _plan_component_sheet_layout(self, *, group_buttons_by_size: bool) -> Optional[Dict[str, Any]]:
@@ -3010,7 +3038,6 @@ class GuiBuilderApp:
 
                 include_in_manifest = ent.tool in (
                     Tool.BUTTON_STANDARD,
-                    Tool.BUTTON_PRESS,
                     Tool.BUTTON_TOGGLE,
                     Tool.TEXT_SLOT,
                     Tool.TEXT_ENTRY,
@@ -3045,6 +3072,10 @@ class GuiBuilderApp:
                     "label": self._component_label_for_entry(ent),
                 }
 
+                meta = ent.meta if isinstance(ent.meta, dict) else {}
+                if bool(meta.get("locked", False)):
+                    comp["locked"] = True
+
                 if str(comp_type) == "scroll_list":
                     raw_items = str(ent.label or "")
                     items = [s.strip() for s in raw_items.split(",")]
@@ -3068,12 +3099,12 @@ class GuiBuilderApp:
                 if needs_texture:
                     # Default: one unique texture block per component.
                     # For buttons, optionally reuse one texture per size.
-                    if ent.tool in (Tool.BUTTON_STANDARD, Tool.BUTTON_PRESS, Tool.BUTTON_TOGGLE) and group_buttons_by_size:
+                    if ent.tool in (Tool.BUTTON_STANDARD, Tool.BUTTON_TOGGLE) and group_buttons_by_size:
                         block_key = ("button", w_tiles, h_tiles)
                     else:
                         block_key = ("component", uid)
 
-                    # Our exported block is always 2x2 variants (base/hover/pressed/pressed_hover).
+                    # Our exported block is always 2x2 variants (semantics depend on tool).
                     block_w_px = w_px * 2
                     block_h_px = h_px * 2
 
@@ -3204,14 +3235,18 @@ class GuiBuilderApp:
                 c["tex"] = {"x": int(pos["x"]), "y": int(pos["y"])}
 
                 # Toggle buttons additionally expose the ON texture origin.
-                # Our packed block is 2x2: base (top-left), hover (bottom-left),
-                # pressed/toggled (top-right), pressed_hover (bottom-right).
+                # Our packed block is 2x2: off (top-left), hover (bottom-left),
+                # on (top-right), disabled (bottom-right).
                 if str(c.get("type")) == "toggle_button":
                     try:
-                        w_tiles = int((c.get("size_tiles") or {}).get("w") or 0)
+                        size = c.get("size_tiles") or {}
+                        w_tiles = int(size.get("w") or 0)
+                        h_tiles = int(size.get("h") or 0)
                         w_px = int(w_tiles) * int(TILE_PX)
-                        if w_px > 0:
+                        h_px = int(h_tiles) * int(TILE_PX)
+                        if w_px > 0 and h_px > 0:
                             c["toggle_tex"] = {"x": int(pos["x"]) + w_px, "y": int(pos["y"])}
+                            c["disabled_tex"] = {"x": int(pos["x"]) + w_px, "y": int(pos["y"]) + h_px}
                     except Exception:
                         pass
             if "_block_key" in c:
@@ -3671,7 +3706,6 @@ class GuiBuilderApp:
                     Tool.TEXT_ENTRY,
                     Tool.SELECT_LIST,
                     Tool.BUTTON_STANDARD,
-                    Tool.BUTTON_PRESS,
                     Tool.BUTTON_TOGGLE,
                 ):
                     label_lines.append(ent.label[:24])
@@ -3693,7 +3727,6 @@ class GuiBuilderApp:
 
         colors = {
             Tool.BUTTON_STANDARD: "#3a7bd5",
-            Tool.BUTTON_PRESS: "#2bb673",
             Tool.BUTTON_TOGGLE: "#b05cff",
             Tool.TEXT_ENTRY: "#d57b3a",
             Tool.SELECT_LIST: "#d5c63a",
@@ -3732,7 +3765,7 @@ class GuiBuilderApp:
             )
             return
 
-        if ent.tool in (Tool.BUTTON_STANDARD, Tool.BUTTON_PRESS, Tool.BUTTON_TOGGLE) and ent.label:
+        if ent.tool in (Tool.BUTTON_STANDARD, Tool.BUTTON_TOGGLE) and ent.label:
             label_lines = [ent.label[:24]]
         else:
             label_lines = [ent.tool.value.replace("_", "\n")]

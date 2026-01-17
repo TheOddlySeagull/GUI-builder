@@ -8,7 +8,6 @@ from typing import Any, Dict, List, Optional, Tuple
 class Tool(str, Enum):
     BACKGROUND = "background"
     BUTTON_STANDARD = "button_standard"
-    BUTTON_PRESS = "button_press"
     BUTTON_TOGGLE = "button_toggle"
     TEXT_ENTRY = "text_entry"
     SELECT_LIST = "select_list"
