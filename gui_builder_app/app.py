@@ -2127,9 +2127,10 @@ class GuiBuilderApp:
         Includes:
         - painted background (tiled using the skin pack Background.png if present)
         - background border overlay
-        - non-button elements (text entry/select list/text slot/item slot)
 
-        Excludes buttons entirely.
+        Also includes any *static* components (no hover/pressed variants).
+
+        Excludes components that have variant states; those are exported as separate textures.
         Output is TILE_PX-per-cell (16x16 -> 256x256, 32x32 -> 512x512).
         """
 
@@ -2179,9 +2180,12 @@ class GuiBuilderApp:
             cell_set = set(r.cells())
             self._blit_ctm_cellset_to_image(img, atlas, cell_set, "button_background")
 
-        # Overlay non-button elements.
+        # Bake any *static* components into the background.
+        # IMPORTANT: render each entry separately to avoid CTM connections between distinct entries.
         for ent in page.entries.values():
-            if ent.tool in button_tools or ent.tool == Tool.BACKGROUND:
+            if ent.tool == Tool.BACKGROUND:
+                continue
+            if self._entry_requires_component_export(ent):
                 continue
 
             modules = ENTRY_TOOL_MODULES.get(ent.tool) or {}
@@ -2195,6 +2199,367 @@ class GuiBuilderApp:
 
         return img
 
+    def _component_type_for_tool(self, tool: Tool) -> str:
+        # Names intended for the CustomNPCs JS consumer.
+        if tool == Tool.BUTTON_STANDARD:
+            return "button"
+        if tool == Tool.BUTTON_TOGGLE:
+            return "toggle_button"
+        if tool == Tool.BUTTON_PRESS:
+            return "press_button"
+        if tool == Tool.TEXT_SLOT:
+            return "label"
+        if tool == Tool.TEXT_ENTRY:
+            return "text_field"
+        if tool == Tool.SELECT_LIST:
+            return "scroll_list"
+        if tool == Tool.ITEM_SLOT:
+            return "item_slot"
+        return str(tool.value)
+
+    def _component_label_for_entry(self, ent: Entry) -> str:
+        # Only some component types use this, but it's harmless to include.
+        return str(getattr(ent, "label", "") or "")
+
+    def _entry_requires_component_export(self, ent: Entry) -> bool:
+        """Return True if this entry needs to be exported as a separate component texture.
+
+        CustomNPCs only supports hover/pressed textures for buttons.
+        All other entry types are baked into the page background export.
+        """
+
+        if ent.tool == Tool.BACKGROUND:
+            return False
+
+        # Only buttons are exported as separate textures.
+        if ent.tool not in (Tool.BUTTON_STANDARD, Tool.BUTTON_PRESS, Tool.BUTTON_TOGGLE):
+            return False
+
+        modules = ENTRY_TOOL_MODULES.get(ent.tool) or {}
+        base_module = modules.get("base")
+        if not base_module:
+            return False
+
+        # Buttons: export if any non-base module is mapped.
+        hover_module = modules.get("hover")
+        pressed_module = modules.get("pressed")
+        pressed_hover_module = modules.get("pressed_hover")
+
+        base = str(base_module)
+        return any(
+            (m is not None and str(m) != base)
+            for m in (hover_module, pressed_module, pressed_hover_module)
+        )
+
+    def _compose_component_block(self, atlas: tk.PhotoImage, ent: Entry) -> Optional[tk.PhotoImage]:
+        """Compose a 2x2 texture block for a component.
+
+        Layout (each cell is the component's own w*h in pixels):
+        - top-left: base
+        - bottom-left: hover
+        - top-right: pressed
+        - bottom-right: pressed_hover
+
+        Missing variants fall back to base/pressed so the JS can use a consistent layout.
+        """
+
+        modules = ENTRY_TOOL_MODULES.get(ent.tool) or {}
+        base_module = modules.get("base")
+        if not base_module:
+            return None
+
+        hover_module = modules.get("hover") or base_module
+        pressed_module = modules.get("pressed") or base_module
+        pressed_hover_module = modules.get("pressed_hover") or pressed_module
+
+        base_img = self._compose_entry_variant_image(atlas, ent, str(base_module))
+        if base_img is None:
+            return None
+        hover_img = self._compose_entry_variant_image(atlas, ent, str(hover_module)) or base_img
+        pressed_img = self._compose_entry_variant_image(atlas, ent, str(pressed_module)) or base_img
+        pressed_hover_img = self._compose_entry_variant_image(atlas, ent, str(pressed_hover_module)) or pressed_img
+
+        w = int(base_img.width())
+        h = int(base_img.height())
+        out = tk.PhotoImage(width=w * 2, height=h * 2)
+        out.tk.call(out, "copy", base_img, "-from", 0, 0, w, h, "-to", 0, 0)
+        out.tk.call(out, "copy", hover_img, "-from", 0, 0, w, h, "-to", 0, h)
+        out.tk.call(out, "copy", pressed_img, "-from", 0, 0, w, h, "-to", w, 0)
+        out.tk.call(out, "copy", pressed_hover_img, "-from", 0, 0, w, h, "-to", w, h)
+        return out
+
+    def _plan_component_sheet_layout(self, *, group_buttons_by_size: bool) -> Optional[Dict[str, Any]]:
+        """Create a theme-independent packing plan for component texture blocks."""
+
+        components: List[Dict[str, Any]] = []
+        block_specs: Dict[Tuple[Any, ...], Dict[str, Any]] = {}
+        block_key_to_rep: Dict[Tuple[Any, ...], Tuple[int, int]] = {}
+
+        # Collect components from all pages.
+        for pid in self._sorted_page_ids():
+            page = self.pages[pid]
+            for ent in page.entries.values():
+                if ent.tool == Tool.BACKGROUND:
+                    continue
+
+                # Static entries are baked into the background PNG and do not appear in component sheets/manifest.
+                if not self._entry_requires_component_export(ent):
+                    continue
+
+                uid = int(getattr(ent, "uid", 0) or 0)
+                if uid <= 0:
+                    # Fallback if ever needed.
+                    uid = int(ent.entry_id)
+
+                r = ent.rect.normalized()
+                w_tiles = int(r.width())
+                h_tiles = int(r.height())
+                w_px = w_tiles * int(TILE_PX)
+                h_px = h_tiles * int(TILE_PX)
+                if w_px <= 0 or h_px <= 0:
+                    continue
+
+                comp_type = self._component_type_for_tool(ent.tool)
+
+                # Default: one unique texture block per component.
+                # For buttons, optionally reuse one texture per size.
+                if ent.tool in (Tool.BUTTON_STANDARD, Tool.BUTTON_PRESS, Tool.BUTTON_TOGGLE) and group_buttons_by_size:
+                    block_key: Tuple[Any, ...] = ("button", w_tiles, h_tiles)
+                else:
+                    block_key = ("component", uid)
+
+                # Our exported block is always 2x2 variants (base/hover/pressed/pressed_hover).
+                block_w_px = w_px * 2
+                block_h_px = h_px * 2
+
+                if block_key not in block_specs:
+                    block_specs[block_key] = {
+                        "block_key": block_key,
+                        "w": int(block_w_px),
+                        "h": int(block_h_px),
+                        "w_tiles": int(w_tiles),
+                        "h_tiles": int(h_tiles),
+                    }
+                    block_key_to_rep[block_key] = (int(pid), int(ent.entry_id))
+
+                components.append(
+                    {
+                        "id": int(uid),
+                        "type": str(comp_type),
+                        "offset": {"page": int(pid), "x": int(r.x0), "y": int(r.y0)},
+                        "size_tiles": {"w": int(w_tiles), "h": int(h_tiles)},
+                        "label": self._component_label_for_entry(ent),
+                        "_block_key": block_key,
+                    }
+                )
+
+        if not components:
+            return {
+                "components": [],
+                "sheets": [],
+                "placement_index": {},
+                "block_key_to_rep": {},
+            }
+
+        # Sort blocks deterministically (big-to-small, then by key).
+        items = list(block_specs.values())
+        items.sort(key=lambda it: (int(it["h"]) * int(it["w"]), int(it["h"]), int(it["w"]), repr(it["block_key"])), reverse=True)
+
+        max_px = int(self.EXPORT_SHEET_PX)
+        if max_px < int(TILE_PX):
+            max_px = 512
+
+        sheet_tiles = max(1, int(max_px) // int(TILE_PX))
+
+        def _new_sheet() -> Dict[str, Any]:
+            return {
+                "w": int(max_px),
+                "h": int(max_px),
+                "placements": [],
+                "occ": [[False for _ in range(sheet_tiles)] for _ in range(sheet_tiles)],
+            }
+
+        def _tiles_needed(px: int) -> int:
+            return max(1, (int(px) + int(TILE_PX) - 1) // int(TILE_PX))
+
+        def _can_place(occ: List[List[bool]], x0: int, y0: int, w_t: int, h_t: int) -> bool:
+            if x0 < 0 or y0 < 0:
+                return False
+            if x0 + w_t > sheet_tiles or y0 + h_t > sheet_tiles:
+                return False
+            for yy in range(y0, y0 + h_t):
+                row = occ[yy]
+                for xx in range(x0, x0 + w_t):
+                    if row[xx]:
+                        return False
+            return True
+
+        def _mark(occ: List[List[bool]], x0: int, y0: int, w_t: int, h_t: int) -> None:
+            for yy in range(y0, y0 + h_t):
+                row = occ[yy]
+                for xx in range(x0, x0 + w_t):
+                    row[xx] = True
+
+        def _place_in_sheet(sheet: Dict[str, Any], it: Dict[str, Any]) -> bool:
+            w = int(it["w"])
+            h = int(it["h"])
+            w_t = _tiles_needed(w)
+            h_t = _tiles_needed(h)
+            occ = sheet["occ"]
+
+            for y0 in range(0, sheet_tiles - h_t + 1):
+                for x0 in range(0, sheet_tiles - w_t + 1):
+                    if _can_place(occ, x0, y0, w_t, h_t):
+                        _mark(occ, x0, y0, w_t, h_t)
+                        sheet["placements"].append(
+                            {"x": int(x0) * int(TILE_PX), "y": int(y0) * int(TILE_PX), "block_key": it["block_key"]}
+                        )
+                        return True
+            return False
+
+        sheets: List[Dict[str, Any]] = []
+        for it in items:
+            w = int(it["w"])
+            h = int(it["h"])
+
+            # Oversized blocks get their own dedicated sheet.
+            if w > max_px or h > max_px:
+                sheets.append({"w": w, "h": h, "placements": [{"x": 0, "y": 0, "block_key": it["block_key"]}]})
+                continue
+
+            placed = False
+            for sh in sheets:
+                if sh.get("occ") is None:
+                    continue
+                if _place_in_sheet(sh, it):
+                    placed = True
+                    break
+            if not placed:
+                sh = _new_sheet()
+                _place_in_sheet(sh, it)
+                sheets.append(sh)
+
+        # Build placement index and strip occ.
+        placement_index: Dict[Tuple[Any, ...], Dict[str, int]] = {}
+        for sheet_idx, sh in enumerate(sheets):
+            for pl in sh["placements"]:
+                bk = pl["block_key"]
+                spec = block_specs.get(bk)
+                if not spec:
+                    continue
+                placement_index[bk] = {
+                    "sheet": int(sheet_idx) + 1,  # 1-based for the JS consumer
+                    "x": int(pl["x"]),
+                    "y": int(pl["y"]),
+                }
+
+        for sh in sheets:
+            if "occ" in sh:
+                del sh["occ"]
+
+        # Attach sheet/x/y to each component.
+        for c in components:
+            bk = c.get("_block_key")
+            pos = placement_index.get(bk)
+            if not pos:
+                continue
+            c["sheet"] = int(pos["sheet"])
+            c["tex"] = {"x": int(pos["x"]), "y": int(pos["y"])}
+            del c["_block_key"]
+
+        # Stable component ordering.
+        components.sort(key=lambda c: (int(c.get("offset", {}).get("page", 0)), int(c.get("id", 0))))
+
+        return {
+            "components": components,
+            "sheets": sheets,
+            "placement_index": placement_index,
+            "block_key_to_rep": block_key_to_rep,
+        }
+
+    def _export_component_sheets_for_theme(self, theme_out_dir: str, plan: Dict[str, Any], *, quiet: bool = False) -> bool:
+        atlas_path = self._skin_pack_modules_path()
+        if not atlas_path or not os.path.exists(atlas_path):
+            if not quiet:
+                messagebox.showerror(
+                    "Export textures",
+                    "Missing skin pack modules.\n\n"
+                    "Create: skin_packs/<skin_name>/Modules.png (+ optional Background.png), then select it in the Skin Pack dropdown.",
+                )
+            return False
+
+        try:
+            atlas = tk.PhotoImage(file=atlas_path)
+        except Exception as e:
+            if not quiet:
+                messagebox.showerror("Export textures", f"Failed to load texture sheet:\n{e}")
+            return False
+
+        # Resolve representative entries for each block.
+        rep_map: Dict[Tuple[Any, ...], Entry] = {}
+        for bk, rep in (plan.get("block_key_to_rep") or {}).items():
+            try:
+                pid, entry_id = rep
+            except Exception:
+                continue
+            page = self.pages.get(int(pid))
+            if not page:
+                continue
+            ent = page.entries.get(int(entry_id))
+            if not ent:
+                continue
+            rep_map[bk] = ent
+
+        sheets = plan.get("sheets") or []
+        placement_index = plan.get("placement_index") or {}
+
+        # Render each sheet.
+        for sheet_idx, sh in enumerate(sheets):
+            sw = int(sh.get("w") or self.EXPORT_SHEET_PX)
+            shh = int(sh.get("h") or self.EXPORT_SHEET_PX)
+            sheet_img = tk.PhotoImage(width=sw, height=shh)
+
+            for pl in sh.get("placements", []):
+                bk = pl.get("block_key")
+                ent = rep_map.get(bk)
+                if ent is None:
+                    continue
+                block_img = self._compose_component_block(atlas, ent)
+                if block_img is None:
+                    continue
+                px = int(pl.get("x") or 0)
+                py = int(pl.get("y") or 0)
+                w = int(block_img.width())
+                h = int(block_img.height())
+                sheet_img.tk.call(sheet_img, "copy", block_img, "-from", 0, 0, w, h, "-to", px, py)
+
+            filename = f"sheet_{int(sheet_idx) + 1}.png"
+            out_path = os.path.join(theme_out_dir, filename)
+            try:
+                sheet_img.write(out_path, format="png")
+            except Exception as e:
+                if not quiet:
+                    messagebox.showerror("Export textures", f"Failed writing {filename}:\n{e}")
+                return False
+
+        # Export backgrounds (per page) into the same theme folder.
+        bg_exported = 0
+        for pid in self._sorted_page_ids():
+            bg_img = self._render_flat_background_page(atlas, pid)
+            if bg_img is None:
+                continue
+            filename = f"background_page_{int(pid)}.png"
+            out_path = os.path.join(theme_out_dir, filename)
+            try:
+                bg_img.write(out_path, format="png")
+            except Exception as e:
+                if not quiet:
+                    messagebox.showerror("Export textures", f"Failed writing {filename}:\n{e}")
+                return False
+            bg_exported += 1
+
+        return True
+
     def export_textures(self) -> None:
         group_by_size = self._ask_export_button_grouping()
         if group_by_size is None:
@@ -2207,48 +2572,33 @@ class GuiBuilderApp:
         gui_root = os.path.join(base_out_dir, self._safe_gui_name(self.gui_name_var.get()))
         os.makedirs(gui_root, exist_ok=True)
 
+
+        plan = self._plan_component_sheet_layout(group_buttons_by_size=bool(group_by_size))
+        if plan is None:
+            return
+
         # Keep exports grouped by skin pack name, even for single-pack export.
         skin_dir = os.path.join(gui_root, self._safe_dir_name(self._skin_pack_name))
         os.makedirs(skin_dir, exist_ok=True)
 
-        theme_dirname = os.path.basename(skin_dir)
-        res = self._export_textures_to(
-            skin_dir,
-            group_by_size=group_by_size,
-            quiet=True,
-            write_manifests=False,
-            path_prefix=f"{theme_dirname}/",
-        )
-        if res is None:
+        if not self._export_component_sheets_for_theme(skin_dir, plan, quiet=False):
             return
 
+        # Minimal, theme-independent manifest.
         gui_manifest: Dict[str, Any] = {
-            "version": 1,
-            "gui_name": str(self._safe_gui_name(self.gui_name_var.get())),
-            "grid_n": int(self.grid_n),
-            "tile_px": int(TILE_PX),
-            "start_page_id": int(self.start_page_id),
-            "button_export_mode": "group_by_size" if group_by_size else "per_button",
-            "themes": {
-                str(res.get("skin_pack") or theme_dirname): {
-                    "buttons": res.get("buttons"),
-                    "backgrounds": res.get("backgrounds"),
-                }
-            },
+            "version": 2,
+            "components": plan.get("components") or [],
         }
 
         if not self._write_gui_manifest(gui_root, gui_manifest):
             return
 
-        export_lines = list(res.get("export_lines") or [])
-        export_lines.append("Manifest: gui_manifest.json")
-        self.set_status(" | ".join(export_lines))
+        theme_dirname = os.path.basename(skin_dir)
+        self.set_status("Exported textures + gui_manifest.json")
         messagebox.showinfo(
             "Export textures",
-            "Export complete:\n\n"
-            + "\n".join(export_lines)
-            + "\n\nOutputs:\n"
-            + f"- {theme_dirname}/buttons_sheet_*.png\n"
+            "Export complete.\n\nOutputs:\n"
+            + f"- {theme_dirname}/sheet_*.png\n"
             + f"- {theme_dirname}/background_page_*.png\n"
             + "- gui_manifest.json",
         )
@@ -2270,483 +2620,6 @@ class GuiBuilderApp:
             "(This only affects exported button textures; backgrounds are unchanged.)",
             default="yes",
         )
-
-    def _export_textures_to(
-        self,
-        out_dir: str,
-        *,
-        group_by_size: bool = True,
-        quiet: bool = False,
-        write_manifests: bool = True,
-        path_prefix: str = "",
-    ) -> Optional[Dict[str, Any]]:
-        """Export GUI textures for CustomNPCs.
-
-        - Buttons: exported as assembled textures, with hover directly beneath base.
-        - Everything else: merged into a per-page flat background texture.
-        """
-
-        atlas_path = self._skin_pack_modules_path()
-        if not atlas_path or not os.path.exists(atlas_path):
-            if not quiet:
-                messagebox.showerror(
-                    "Export textures",
-                    "Missing skin pack modules.\n\n"
-                    "Create: skin_packs/<skin_name>/Modules.png (+ optional Background.png), then select it in the Skin Pack dropdown.",
-                )
-            return None
-
-        try:
-            atlas = tk.PhotoImage(file=atlas_path)
-        except Exception as e:
-            if not quiet:
-                messagebox.showerror("Export textures", f"Failed to load texture sheet:\n{e}")
-            return None
-
-        button_tools = (Tool.BUTTON_STANDARD, Tool.BUTTON_PRESS, Tool.BUTTON_TOGGLE)
-        # Build a set of packed blocks and a list of per-button references.
-        #
-        # When group_by_size=True (default), blocks are deduplicated across buttons
-        # of the same size (current behavior). When False, each button gets its own
-        # exported block even if its size matches others.
-        #
-        # IMPORTANT: CustomNPCs hover texture is taken from directly beneath the base texture.
-        # So we pack (base over hover) and (pressed over pressed_hover) as 2-row blocks.
-        # (kind, top_module, bottom_module, w_tiles, h_tiles)
-        unique_blocks: Dict[Tuple[Any, ...], Dict[str, Any]] = {}
-        refs: List[Dict[str, Any]] = []
-
-        def _stack_pair(top: tk.PhotoImage, bottom: tk.PhotoImage) -> tk.PhotoImage:
-            w = int(top.width())
-            h = int(top.height())
-            out = tk.PhotoImage(width=w, height=h * 2)
-            out.tk.call(out, "copy", top, "-from", 0, 0, w, h, "-to", 0, 0)
-            out.tk.call(out, "copy", bottom, "-from", 0, 0, w, h, "-to", 0, h)
-            return out
-
-        # Collect per-button references; generate unique packed blocks once.
-        for pid in self._sorted_page_ids():
-            page = self.pages[pid]
-            for ent in page.entries.values():
-                if ent.tool not in button_tools:
-                    continue
-
-                modules = ENTRY_TOOL_MODULES.get(ent.tool) or {}
-                r = ent.rect.normalized()
-                w_tiles = int(r.width())
-                h_tiles = int(r.height())
-
-                uid = int(getattr(ent, "uid", 0) or 0)
-                entry_identity: Any = uid if uid > 0 else (int(pid), int(ent.entry_id))
-
-                # Unpressed pair (base + hover). If hover module is missing, fall back to base.
-                base_module = modules.get("base")
-                if base_module:
-                    hover_module = modules.get("hover") or base_module
-                    if group_by_size:
-                        unpressed_key: Tuple[Any, ...] = (
-                            "unpressed",
-                            str(base_module),
-                            str(hover_module),
-                            w_tiles,
-                            h_tiles,
-                        )
-                    else:
-                        unpressed_key = (
-                            "unpressed",
-                            str(base_module),
-                            str(hover_module),
-                            w_tiles,
-                            h_tiles,
-                            entry_identity,
-                        )
-                    if unpressed_key not in unique_blocks:
-                        base_img = self._compose_entry_variant_image(atlas, ent, str(base_module))
-                        hover_img = self._compose_entry_variant_image(atlas, ent, str(hover_module))
-                        if base_img is None:
-                            continue
-                        if hover_img is None:
-                            hover_img = base_img
-                        block_img = _stack_pair(base_img, hover_img)
-                        unique_blocks[unpressed_key] = {
-                            "kind": "unpressed",
-                            "top_module": str(base_module),
-                            "bottom_module": str(hover_module),
-                            "w": int(block_img.width()),
-                            "h": int(block_img.height()),
-                            "row_h": int(base_img.height()),
-                            "image": block_img,
-                        }
-
-                    refs.append(
-                        {
-                            "uid": uid,
-                            "page_id": int(pid),
-                            "entry_id": int(ent.entry_id),
-                            "tool": ent.tool.value,
-                            "variants": {
-                                "base": {"block_key": unpressed_key, "row": 0},
-                                "hover": {"block_key": unpressed_key, "row": 1},
-                            },
-                        }
-                    )
-
-                # Pressed pair (pressed + pressed_hover). If pressed_hover module is missing, fall back to pressed.
-                pressed_module = modules.get("pressed")
-                if pressed_module:
-                    pressed_hover_module = modules.get("pressed_hover") or pressed_module
-                    if group_by_size:
-                        pressed_key: Tuple[Any, ...] = (
-                            "pressed",
-                            str(pressed_module),
-                            str(pressed_hover_module),
-                            w_tiles,
-                            h_tiles,
-                        )
-                    else:
-                        pressed_key = (
-                            "pressed",
-                            str(pressed_module),
-                            str(pressed_hover_module),
-                            w_tiles,
-                            h_tiles,
-                            entry_identity,
-                        )
-                    if pressed_key not in unique_blocks:
-                        pressed_img = self._compose_entry_variant_image(atlas, ent, str(pressed_module))
-                        hover_img = self._compose_entry_variant_image(atlas, ent, str(pressed_hover_module))
-                        if pressed_img is None:
-                            # If pressed is missing, skip pressed exports.
-                            pressed_img = None
-                        if pressed_img is not None:
-                            if hover_img is None:
-                                hover_img = pressed_img
-                            block_img = _stack_pair(pressed_img, hover_img)
-                            unique_blocks[pressed_key] = {
-                                "kind": "pressed",
-                                "top_module": str(pressed_module),
-                                "bottom_module": str(pressed_hover_module),
-                                "w": int(block_img.width()),
-                                "h": int(block_img.height()),
-                                "row_h": int(pressed_img.height()),
-                                "image": block_img,
-                            }
-
-                    # Attach pressed variants to the most recent ref for this entry if it exists.
-                    if refs and refs[-1].get("entry_id") == int(ent.entry_id) and refs[-1].get("page_id") == int(pid):
-                        refs[-1]["variants"].update(
-                            {
-                                "pressed": {"block_key": pressed_key, "row": 0},
-                                "pressed_hover": {"block_key": pressed_key, "row": 1},
-                            }
-                        )
-                    else:
-                        refs.append(
-                            {
-                                "uid": uid,
-                                "page_id": int(pid),
-                                "entry_id": int(ent.entry_id),
-                                "tool": ent.tool.value,
-                                "variants": {
-                                    "pressed": {"block_key": pressed_key, "row": 0},
-                                    "pressed_hover": {"block_key": pressed_key, "row": 1},
-                                },
-                            }
-                        )
-
-        export_lines: List[str] = []
-
-        buttons_manifest: Optional[Dict[str, Any]] = None
-        backgrounds_manifest: Optional[Dict[str, Any]] = None
-
-        # ----------------------------
-        # 1) Buttons (assembled)
-        # ----------------------------
-        if refs:
-            # Convert unique blocks to a list for packing.
-            items: List[Dict[str, Any]] = []
-            for block_key, it in unique_blocks.items():
-                items.append({"block_key": block_key, **it})
-
-            # Sort big-to-small to reduce fragmentation. Placement still uses a
-            # top-left first-fit search, so small items will fill earlier gaps.
-            items.sort(key=lambda it: (int(it["h"]) * int(it["w"]), it["h"], it["w"]), reverse=True)
-
-            max_px = int(self.EXPORT_SHEET_PX)
-            if max_px < TILE_PX:
-                max_px = 512
-
-            sheets: List[Dict[str, Any]] = []
-
-            sheet_tiles = max(1, int(max_px) // int(TILE_PX))
-
-            def _new_sheet() -> Dict[str, Any]:
-                return {
-                    "w": max_px,
-                    "h": max_px,
-                    "placements": [],
-                    "occ": [[False for _ in range(sheet_tiles)] for _ in range(sheet_tiles)],
-                }
-
-            def _tiles_needed(px: int) -> int:
-                return max(1, (int(px) + int(TILE_PX) - 1) // int(TILE_PX))
-
-            def _can_place(occ: List[List[bool]], x0: int, y0: int, w_t: int, h_t: int) -> bool:
-                if x0 < 0 or y0 < 0:
-                    return False
-                if x0 + w_t > sheet_tiles or y0 + h_t > sheet_tiles:
-                    return False
-                for yy in range(y0, y0 + h_t):
-                    row = occ[yy]
-                    for xx in range(x0, x0 + w_t):
-                        if row[xx]:
-                            return False
-                return True
-
-            def _mark(occ: List[List[bool]], x0: int, y0: int, w_t: int, h_t: int) -> None:
-                for yy in range(y0, y0 + h_t):
-                    row = occ[yy]
-                    for xx in range(x0, x0 + w_t):
-                        row[xx] = True
-
-            def _place_in_sheet(sheet: Dict[str, Any], it: Dict[str, Any]) -> bool:
-                w = int(it["w"])
-                h = int(it["h"])
-                w_t = _tiles_needed(w)
-                h_t = _tiles_needed(h)
-                occ = sheet["occ"]
-
-                # Top-left first-fit.
-                for y0 in range(0, sheet_tiles - h_t + 1):
-                    for x0 in range(0, sheet_tiles - w_t + 1):
-                        if _can_place(occ, x0, y0, w_t, h_t):
-                            _mark(occ, x0, y0, w_t, h_t)
-                            sheet["placements"].append({"x": x0 * TILE_PX, "y": y0 * TILE_PX, "item": it})
-                            return True
-                return False
-
-            for it in items:
-                w = int(it["w"])
-                h = int(it["h"])
-
-                # Oversized images get their own dedicated sheet.
-                if w > max_px or h > max_px:
-                    sheets.append({"w": w, "h": h, "placements": [{"x": 0, "y": 0, "item": it}]})
-                    continue
-
-                placed = False
-                for sh in sheets:
-                    if sh.get("occ") is None:
-                        # Dedicated oversized sheet; skip.
-                        continue
-                    if _place_in_sheet(sh, it):
-                        placed = True
-                        break
-
-                if not placed:
-                    sh = _new_sheet()
-                    _place_in_sheet(sh, it)
-                    sheets.append(sh)
-
-            # Strip occupancy before rendering/writing (keep output JSON clean).
-            for sh in sheets:
-                if "occ" in sh:
-                    del sh["occ"]
-
-            # Index placements for fast lookup when writing the manifest.
-            placement_index: Dict[Tuple[str, str, str, int, int], Dict[str, int]] = {}
-            for sheet_idx, sh in enumerate(sheets):
-                for pl in sh["placements"]:
-                    it = pl["item"]
-                    placement_index[it["block_key"]] = {
-                        "sheet": int(sheet_idx),
-                        "x": int(pl["x"]),
-                        "y": int(pl["y"]),
-                        "w": int(it["w"]),
-                        "h": int(it["h"]),
-                        "row_h": int(it.get("row_h") or (int(it["h"]) // 2)),
-                    }
-
-            manifest: Dict[str, Any] = {
-                "version": 1,
-                "source_atlas": os.path.basename(atlas_path),
-                "tile_px": TILE_PX,
-                "sheet_px": max_px,
-                "button_export_mode": "group_by_size" if group_by_size else "per_button",
-                "sheets": [],
-                "buttons": {},
-            }
-
-            # Render sheets and write PNGs.
-            for sheet_idx, sh in enumerate(sheets):
-                sw = int(sh["w"])
-                shh = int(sh["h"])
-                sheet_img = tk.PhotoImage(width=sw, height=shh)
-
-                for pl in sh["placements"]:
-                    px = int(pl["x"])
-                    py = int(pl["y"])
-                    it = pl["item"]
-                    img: tk.PhotoImage = it["image"]
-                    w = int(it["w"])
-                    h = int(it["h"])
-                    sheet_img.tk.call(sheet_img, "copy", img, "-from", 0, 0, w, h, "-to", px, py)
-
-                filename = f"buttons_sheet_{sheet_idx}.png"
-                out_path = os.path.join(out_dir, filename)
-                try:
-                    sheet_img.write(out_path, format="png")
-                except Exception as e:
-                    if not quiet:
-                        messagebox.showerror("Export textures", f"Failed writing {filename}:\n{e}")
-                    return None
-
-                manifest["sheets"].append({"filename": filename, "width": sw, "height": shh})
-
-            # Build the per-button mapping, referencing packed unique blocks.
-            ref_uses = 0
-            for ref in refs:
-                uid = int(ref.get("uid") or 0)
-                if uid <= 0:
-                    uid = int(ref.get("entry_id") or 0)
-
-                b = manifest["buttons"].setdefault(
-                    str(uid),
-                    {
-                        "uid": uid,
-                        "page_id": int(ref["page_id"]),
-                        "entry_id": int(ref["entry_id"]),
-                        "tool": str(ref["tool"]),
-                        "variants": {},
-                    },
-                )
-
-                variants = ref.get("variants")
-                if not isinstance(variants, dict):
-                    continue
-
-                for vname, vinfo in variants.items():
-                    if not isinstance(vinfo, dict):
-                        continue
-                    block_key = vinfo.get("block_key")
-                    row = int(vinfo.get("row", 0))
-                    pos = placement_index.get(block_key)
-                    if not pos:
-                        continue
-                    row_h = int(pos.get("row_h") or 0)
-                    if row_h <= 0:
-                        continue
-
-                    ref_uses += 1
-                    b["variants"][str(vname)] = {
-                        "sheet": int(pos["sheet"]),
-                        "x": int(pos["x"]),
-                        "y": int(pos["y"]) + (row * row_h),
-                        "w": int(pos["w"]),
-                        "h": row_h,
-                    }
-
-            # Optionally prefix filenames so a single top-level manifest can reference per-theme outputs.
-            if path_prefix:
-                for sh in manifest.get("sheets", []):
-                    if isinstance(sh, dict) and isinstance(sh.get("filename"), str):
-                        sh["filename"] = f"{path_prefix}{sh['filename']}"
-
-            buttons_manifest = manifest
-
-            if write_manifests:
-                manifest_path = os.path.join(out_dir, "buttons_manifest.json")
-                try:
-                    with open(manifest_path, "w", encoding="utf-8") as f:
-                        json.dump(manifest, f, indent=2)
-                except Exception as e:
-                    if not quiet:
-                        messagebox.showerror("Export textures", f"Failed writing buttons_manifest.json:\n{e}")
-                    return None
-
-            export_lines.append(
-                f"Buttons: {len(items)} unique blocks, {ref_uses} uses, {len(sheets)} sheet(s)"
-            )
-        else:
-            export_lines.append("Buttons: none")
-
-        # ----------------------------
-        # 2) Flat backgrounds (per page, one PNG per page)
-        # ----------------------------
-        bg_manifest: Dict[str, Any] = {
-            "version": 2,
-            "grid_n": int(self.grid_n),
-            "tile_px": int(TILE_PX),
-            "start_page_id": int(self.start_page_id),
-            "pages": {},
-        }
-
-        bg_exported = 0
-        for pid in self._sorted_page_ids():
-            bg_img = self._render_flat_background_page(atlas, pid)
-            if bg_img is None:
-                continue
-
-            filename = f"background_page_{int(pid)}.png"
-            out_path = os.path.join(out_dir, filename)
-            try:
-                bg_img.write(out_path, format="png")
-            except Exception as e:
-                if not quiet:
-                    messagebox.showerror("Export textures", f"Failed writing {filename}:\n{e}")
-                return None
-
-            bg_manifest["pages"][str(int(pid))] = {
-                "page_id": int(pid),
-                "filename": filename,
-                "width": int(bg_img.width()),
-                "height": int(bg_img.height()),
-            }
-            bg_exported += 1
-
-        if bg_exported <= 0:
-            export_lines.append("Backgrounds: none")
-        else:
-            # Optionally prefix filenames so a single top-level manifest can reference per-theme outputs.
-            if path_prefix:
-                pages = bg_manifest.get("pages")
-                if isinstance(pages, dict):
-                    for p in pages.values():
-                        if isinstance(p, dict) and isinstance(p.get("filename"), str):
-                            p["filename"] = f"{path_prefix}{p['filename']}"
-
-            backgrounds_manifest = bg_manifest
-
-            if write_manifests:
-                bg_manifest_path = os.path.join(out_dir, "background_manifest.json")
-                try:
-                    with open(bg_manifest_path, "w", encoding="utf-8") as f:
-                        json.dump(bg_manifest, f, indent=2)
-                except Exception as e:
-                    if not quiet:
-                        messagebox.showerror("Export textures", f"Failed writing background_manifest.json:\n{e}")
-                    return None
-
-            export_lines.append(f"Backgrounds: {bg_exported} page(s)")
-
-        self.set_status(" | ".join(export_lines))
-
-        if (not quiet) and write_manifests:
-            messagebox.showinfo(
-                "Export textures",
-                "Export complete:\n\n"
-                + "\n".join(export_lines)
-                + "\n\nOutputs:\n"
-                + "- buttons_sheet_*.png + buttons_manifest.json\n"
-                + "- background_page_*.png + background_manifest.json",
-            )
-
-        return {
-            "skin_pack": self._skin_pack_name,
-            "export_lines": export_lines,
-            "buttons": buttons_manifest,
-            "backgrounds": backgrounds_manifest,
-        }
 
     def export_all_skin_packs(self) -> None:
         # Refresh list first so we export what's actually on disk.
@@ -2771,56 +2644,39 @@ class GuiBuilderApp:
         gui_root = os.path.join(base_out_dir, self._safe_gui_name(self.gui_name_var.get()))
         os.makedirs(gui_root, exist_ok=True)
 
+        plan = self._plan_component_sheet_layout(group_buttons_by_size=bool(group_by_size))
+        if plan is None:
+            return
+
+        # Minimal, theme-independent manifest.
+        gui_manifest: Dict[str, Any] = {
+            "version": 2,
+            "components": plan.get("components") or [],
+        }
+
+        if not self._write_gui_manifest(gui_root, gui_manifest, quiet=True):
+            messagebox.showerror(
+                "Export all skin packs",
+                "Failed writing gui_manifest.json.",
+            )
+            return
+
         previous = self._skin_pack_name
         ok = 0
         failed: List[str] = []
-        themes: Dict[str, Any] = {}
 
         try:
             for name in packs:
-                # Switch skin pack (loads modules/background).
                 self._on_skin_pack_changed(name)
                 out_dir = os.path.join(gui_root, self._safe_dir_name(name))
                 os.makedirs(out_dir, exist_ok=True)
 
-                theme_dirname = os.path.basename(out_dir)
-                res = self._export_textures_to(
-                    out_dir,
-                    group_by_size=group_by_size,
-                    quiet=True,
-                    write_manifests=False,
-                    path_prefix=f"{theme_dirname}/",
-                )
-                if res is None:
+                if not self._export_component_sheets_for_theme(out_dir, plan, quiet=True):
                     failed.append(name)
                     continue
-
                 ok += 1
-                themes[str(name)] = {
-                    "buttons": res.get("buttons"),
-                    "backgrounds": res.get("backgrounds"),
-                }
         finally:
-            # Restore previous selection.
             self._on_skin_pack_changed(previous)
-
-        if ok > 0:
-            gui_manifest: Dict[str, Any] = {
-                "version": 1,
-                "gui_name": str(self._safe_gui_name(self.gui_name_var.get())),
-                "grid_n": int(self.grid_n),
-                "tile_px": int(TILE_PX),
-                "start_page_id": int(self.start_page_id),
-                "button_export_mode": "group_by_size" if group_by_size else "per_button",
-                "themes": themes,
-            }
-
-            if not self._write_gui_manifest(gui_root, gui_manifest, quiet=True):
-                messagebox.showerror(
-                    "Export all skin packs",
-                    "Failed writing gui_manifest.json (PNG exports may still exist).",
-                )
-                return
 
         if failed:
             messagebox.showwarning(

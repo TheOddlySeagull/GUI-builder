@@ -136,7 +136,7 @@ To export the same GUI textures for every detected skin pack:
 
 This export produces two outputs:
 
-1) **Buttons** (assembled): exported as fully assembled images (base/hover/pressed/pressed_hover when available), packed into one or more PNG sheets plus a manifest:
+1) **Buttons** (assembled): exported as fully assembled images (base/hover/pressed/pressed_hover when available), packed into one or more PNG sheets and referenced by `gui_manifest.json`.
 
 - `<skin_pack_name>/buttons_sheet_0.png`, `<skin_pack_name>/buttons_sheet_1.png`, ...
 - (referenced from `gui_manifest.json`)
@@ -150,11 +150,10 @@ Hover layout rule:
 
 - painted background area (tiled using the selected skin pack `Background.png` if present)
 - background border overlay
-- non-button elements (text entry/select list/text slot/item slot)
+- button placeholders filled using the `button_background` CTM module
+- all non-button components (text entry/select list/text slot/item slot)
 
 Buttons are excluded from the background export (they remain separate assembled textures).
-
-To make exported GUIs look less empty, button rectangles are filled using the `button_background` CTM module when baking backgrounds.
 
 Outputs:
 
