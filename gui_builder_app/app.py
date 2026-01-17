@@ -2858,7 +2858,12 @@ class GuiBuilderApp:
         if not base_module:
             return False
 
-        # Buttons: export if any non-base module is mapped.
+        # Toggle buttons need a dedicated texture block even if the atlas variants
+        # are identical, because the consumer expects both OFF and ON textures.
+        if ent.tool == Tool.BUTTON_TOGGLE:
+            return True
+
+        # Other buttons: export if any non-base module is mapped.
         hover_module = modules.get("hover")
         pressed_module = modules.get("pressed")
         pressed_hover_module = modules.get("pressed_hover")
@@ -2914,15 +2919,28 @@ class GuiBuilderApp:
         block_key_to_rep: Dict[Tuple[Any, ...], Tuple[int, int]] = {}
 
         # Collect components from all pages.
+        # NOTE: Only buttons are exported as separate component textures.
+        # Other component types are baked into the page background PNG, but we still include
+        # them in the manifest so consumers can lay out and reference them.
         for pid in self._sorted_page_ids():
             page = self.pages[pid]
             for ent in page.entries.values():
                 if ent.tool == Tool.BACKGROUND:
                     continue
 
-                # Static entries are baked into the background PNG and do not appear in component sheets/manifest.
-                if not self._entry_requires_component_export(ent):
+                include_in_manifest = ent.tool in (
+                    Tool.BUTTON_STANDARD,
+                    Tool.BUTTON_PRESS,
+                    Tool.BUTTON_TOGGLE,
+                    Tool.TEXT_SLOT,
+                    Tool.TEXT_ENTRY,
+                    Tool.SELECT_LIST,
+                    Tool.ITEM_SLOT,
+                )
+                if not include_in_manifest:
                     continue
+
+                needs_texture = self._entry_requires_component_export(ent)
 
                 uid = int(getattr(ent, "uid", 0) or 0)
                 if uid <= 0:
@@ -2939,37 +2957,42 @@ class GuiBuilderApp:
 
                 comp_type = self._component_type_for_tool(ent.tool)
 
-                # Default: one unique texture block per component.
-                # For buttons, optionally reuse one texture per size.
-                if ent.tool in (Tool.BUTTON_STANDARD, Tool.BUTTON_PRESS, Tool.BUTTON_TOGGLE) and group_buttons_by_size:
-                    block_key: Tuple[Any, ...] = ("button", w_tiles, h_tiles)
-                else:
-                    block_key = ("component", uid)
+                comp: Dict[str, Any] = {
+                    "id": int(uid),
+                    "type": str(comp_type),
+                    "offset": {"page": int(pid), "x": int(r.x0), "y": int(r.y0)},
+                    "size_tiles": {"w": int(w_tiles), "h": int(h_tiles)},
+                    "label": self._component_label_for_entry(ent),
+                }
 
-                # Our exported block is always 2x2 variants (base/hover/pressed/pressed_hover).
-                block_w_px = w_px * 2
-                block_h_px = h_px * 2
+                if ent.tool == Tool.BUTTON_TOGGLE:
+                    comp["toggled"] = bool(getattr(ent, "active", False))
 
-                if block_key not in block_specs:
-                    block_specs[block_key] = {
-                        "block_key": block_key,
-                        "w": int(block_w_px),
-                        "h": int(block_h_px),
-                        "w_tiles": int(w_tiles),
-                        "h_tiles": int(h_tiles),
-                    }
-                    block_key_to_rep[block_key] = (int(pid), int(ent.entry_id))
+                if needs_texture:
+                    # Default: one unique texture block per component.
+                    # For buttons, optionally reuse one texture per size.
+                    if ent.tool in (Tool.BUTTON_STANDARD, Tool.BUTTON_PRESS, Tool.BUTTON_TOGGLE) and group_buttons_by_size:
+                        block_key = ("button", w_tiles, h_tiles)
+                    else:
+                        block_key = ("component", uid)
 
-                components.append(
-                    {
-                        "id": int(uid),
-                        "type": str(comp_type),
-                        "offset": {"page": int(pid), "x": int(r.x0), "y": int(r.y0)},
-                        "size_tiles": {"w": int(w_tiles), "h": int(h_tiles)},
-                        "label": self._component_label_for_entry(ent),
-                        "_block_key": block_key,
-                    }
-                )
+                    # Our exported block is always 2x2 variants (base/hover/pressed/pressed_hover).
+                    block_w_px = w_px * 2
+                    block_h_px = h_px * 2
+
+                    if block_key not in block_specs:
+                        block_specs[block_key] = {
+                            "block_key": block_key,
+                            "w": int(block_w_px),
+                            "h": int(block_h_px),
+                            "w_tiles": int(w_tiles),
+                            "h_tiles": int(h_tiles),
+                        }
+                        block_key_to_rep[block_key] = (int(pid), int(ent.entry_id))
+
+                    comp["_block_key"] = block_key
+
+                components.append(comp)
 
         if not components:
             return {
@@ -3078,12 +3101,24 @@ class GuiBuilderApp:
         # Attach sheet/x/y to each component.
         for c in components:
             bk = c.get("_block_key")
-            pos = placement_index.get(bk)
-            if not pos:
-                continue
-            c["sheet"] = int(pos["sheet"])
-            c["tex"] = {"x": int(pos["x"]), "y": int(pos["y"])}
-            del c["_block_key"]
+            pos = placement_index.get(bk) if bk is not None else None
+            if pos:
+                c["sheet"] = int(pos["sheet"])
+                c["tex"] = {"x": int(pos["x"]), "y": int(pos["y"])}
+
+                # Toggle buttons additionally expose the ON texture origin.
+                # Our packed block is 2x2: base (top-left), hover (bottom-left),
+                # pressed/toggled (top-right), pressed_hover (bottom-right).
+                if str(c.get("type")) == "toggle_button":
+                    try:
+                        w_tiles = int((c.get("size_tiles") or {}).get("w") or 0)
+                        w_px = int(w_tiles) * int(TILE_PX)
+                        if w_px > 0:
+                            c["toggle_tex"] = {"x": int(pos["x"]) + w_px, "y": int(pos["y"])}
+                    except Exception:
+                        pass
+            if "_block_key" in c:
+                del c["_block_key"]
 
         # Stable component ordering.
         components.sort(key=lambda c: (int(c.get("offset", {}).get("page", 0)), int(c.get("id", 0))))
