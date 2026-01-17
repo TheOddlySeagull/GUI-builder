@@ -149,6 +149,10 @@ And the component data is grouped per page:
 
 - `pages`: list of `{ "page": <page_id>, "components": [...] }`
 
+Components can optionally include:
+
+- `hover_text`: only present when "Show hover text" is enabled for that component
+
 When exporting, you can choose:
 
 - **Reuse one texture per button size** (default/current behavior)

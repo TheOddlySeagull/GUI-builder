@@ -2965,6 +2965,9 @@ class GuiBuilderApp:
                     "label": self._component_label_for_entry(ent),
                 }
 
+                if self._hover_text_enabled_for(ent):
+                    comp["hover_text"] = self._format_hover_tooltip_text(ent)
+
                 if ent.tool == Tool.BUTTON_TOGGLE:
                     comp["toggled"] = bool(getattr(ent, "active", False))
 
