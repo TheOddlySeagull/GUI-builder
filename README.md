@@ -121,6 +121,8 @@ Exports will be written under:
 
 - `/<export base folder>/<gui_name>/<skin_pack_name>/...`
 
+If the `/<export base folder>/<gui_name>/` folder already exists, its contents are cleared and replaced by the new export.
+
 Manifests are grouped into one file:
 
 - `/<export base folder>/<gui_name>/gui_manifest.json`

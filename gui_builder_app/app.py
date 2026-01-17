@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import sys
 import tkinter as tk
 from tkinter import filedialog, messagebox
@@ -1804,6 +1805,34 @@ class GuiBuilderApp:
         safe = self._safe_dir_name(str(name))
         return safe if safe != "skin" else "gui"
 
+    def _reset_export_dir(self, path: str, *, quiet: bool = False) -> bool:
+        """Ensure `path` exists and is empty.
+
+        This is used for exports so repeated exports replace prior content.
+        """
+
+        try:
+            if os.path.exists(path):
+                if not os.path.isdir(path):
+                    if not quiet:
+                        messagebox.showerror("Export textures", f"Export path exists but is not a folder:\n{path}")
+                    return False
+
+                for name in os.listdir(path):
+                    child = os.path.join(path, name)
+                    if os.path.isdir(child):
+                        shutil.rmtree(child)
+                    else:
+                        os.remove(child)
+            else:
+                os.makedirs(path, exist_ok=True)
+        except Exception as e:
+            if not quiet:
+                messagebox.showerror("Export textures", f"Failed clearing export folder:\n{path}\n\n{e}")
+            return False
+
+        return True
+
     def _write_gui_manifest(self, gui_root: str, manifest: Dict[str, Any], *, quiet: bool = False) -> bool:
         path = os.path.join(gui_root, "gui_manifest.json")
         try:
@@ -2570,7 +2599,8 @@ class GuiBuilderApp:
             return
 
         gui_root = os.path.join(base_out_dir, self._safe_gui_name(self.gui_name_var.get()))
-        os.makedirs(gui_root, exist_ok=True)
+        if not self._reset_export_dir(gui_root, quiet=False):
+            return
 
 
         plan = self._plan_component_sheet_layout(group_buttons_by_size=bool(group_by_size))
@@ -2642,7 +2672,12 @@ class GuiBuilderApp:
             return
 
         gui_root = os.path.join(base_out_dir, self._safe_gui_name(self.gui_name_var.get()))
-        os.makedirs(gui_root, exist_ok=True)
+        if not self._reset_export_dir(gui_root, quiet=True):
+            messagebox.showerror(
+                "Export all skin packs",
+                f"Failed clearing export folder:\n{gui_root}",
+            )
+            return
 
         plan = self._plan_component_sheet_layout(group_buttons_by_size=bool(group_by_size))
         if plan is None:
