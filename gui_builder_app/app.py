@@ -1576,6 +1576,11 @@ class GuiBuilderApp:
             self.set_status("Preview: empty")
             return
 
+        meta = ent.meta if isinstance(ent.meta, dict) else {}
+        if bool(meta.get("locked", False)):
+            self.set_status(f"Preview: entry {ent.entry_id} is locked")
+            return
+
         if ent.tool == Tool.BUTTON_STANDARD:
             source_page_id = self.current_page_id
             ent.active = True
@@ -2156,6 +2161,16 @@ class GuiBuilderApp:
 
         if ent.tool == Tool.BUTTON_TOGGLE:
             mapping = ENTRY_TOOL_MODULES.get(ent.tool, {})
+            if locked:
+                if bool(ent.active):
+                    return str(
+                        mapping.get("locked_pressed")
+                        or mapping.get("disabled")
+                        or mapping.get("on")
+                        or mapping.get("base")
+                        or ""
+                    )
+                return str(mapping.get("disabled") or mapping.get("base") or "")
             if disabled:
                 return str(mapping.get("disabled") or mapping.get("base") or "")
             if bool(ent.active):
@@ -2935,6 +2950,10 @@ class GuiBuilderApp:
             on_module = modules.get("on") or modules.get("pressed") or base_module
             disabled_module = modules.get("disabled") or modules.get("pressed_hover") or on_module
 
+            meta = ent.meta if isinstance(ent.meta, dict) else {}
+            if bool(meta.get("locked", False)) and bool(ent.active):
+                disabled_module = modules.get("locked_pressed") or disabled_module
+
             off_img = self._compose_entry_variant_image(atlas, ent, str(base_module))
             if off_img is None:
                 return None
@@ -3095,12 +3114,26 @@ class GuiBuilderApp:
 
                 if ent.tool == Tool.BUTTON_TOGGLE:
                     comp["toggled"] = bool(getattr(ent, "active", False))
+                    # Backward compatibility with JS consumers that only understand `disabled`.
+                    # Locked toggle buttons are exported as disabled so they cannot be interacted with.
+                    if bool(meta.get("locked", False)):
+                        comp["disabled"] = True
 
                 if needs_texture:
                     # Default: one unique texture block per component.
                     # For buttons, optionally reuse one texture per size.
                     if ent.tool in (Tool.BUTTON_STANDARD, Tool.BUTTON_TOGGLE) and group_buttons_by_size:
-                        block_key = ("button", w_tiles, h_tiles)
+                        if ent.tool == Tool.BUTTON_TOGGLE:
+                            # Toggle blocks may depend on locked/active (we may bake a locked-state variant).
+                            block_key = (
+                                "toggle",
+                                w_tiles,
+                                h_tiles,
+                                bool(meta.get("locked", False)),
+                                bool(getattr(ent, "active", False)),
+                            )
+                        else:
+                            block_key = ("button", w_tiles, h_tiles)
                     else:
                         block_key = ("component", uid)
 

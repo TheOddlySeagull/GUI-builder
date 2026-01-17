@@ -16,6 +16,8 @@
     "button_toggle_on": {"module": [0, 1]},
     "button_toggle_disabled": {"module": [1, 1]},
 
+    "button_toggle_locked_pressed": {"module": [2, 3]},
+
     "text_unpressed": {"module": [2, 0]},
 
     "item_slot": {"module": [2, 1]},
@@ -42,7 +44,8 @@
       "base": "button_unpressed",
       "hover": "button_hover",
       "on": "button_toggle_on",
-      "disabled": "button_toggle_disabled"
+      "disabled": "button_toggle_disabled",
+      "locked_pressed": "button_toggle_locked_pressed"
     },
     "text_slot": {
       "base": "text_unpressed"
