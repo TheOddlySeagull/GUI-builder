@@ -117,7 +117,7 @@ class GuiBuilderApp:
         # Tool-level metadata (applies to newly placed entries while tool is selected)
         self.standard_button_tool_meta: Dict[str, Any] = {
             "page_change": {
-                "mode": "none",  # none|goto|next|prev
+                "mode": "none",  # none|goto|next|prev|close
                 "target_page_id": 1,
                 "modulo": True,
             }
@@ -793,6 +793,16 @@ class GuiBuilderApp:
 
         tk.Radiobutton(
             self.std_btn_meta_frame,
+            text="Close GUI",
+            value="close",
+            variable=self.std_btn_action_var,
+            command=on_action_changed,
+            anchor="w",
+            justify="left",
+        ).pack(fill="x", anchor="w")
+
+        tk.Radiobutton(
+            self.std_btn_meta_frame,
             text="Go to page ID",
             value="goto",
             variable=self.std_btn_action_var,
@@ -959,6 +969,16 @@ class GuiBuilderApp:
             self.sel_button_meta_frame,
             text="None",
             value="none",
+            variable=self.sel_btn_action_var,
+            command=on_sel_btn_action_changed,
+            anchor="w",
+            justify="left",
+        ).pack(fill="x", anchor="w")
+
+        tk.Radiobutton(
+            self.sel_button_meta_frame,
+            text="Close GUI",
+            value="close",
             variable=self.sel_btn_action_var,
             command=on_sel_btn_action_changed,
             anchor="w",
@@ -1387,6 +1407,8 @@ class GuiBuilderApp:
         if ent.tool == Tool.BUTTON_STANDARD:
             meta = ent.meta if isinstance(ent.meta, dict) else {}
             page_change = meta.get("page_change")
+            if mode == "close":
+                return "Standard: action=close_gui"
             if not isinstance(page_change, dict):
                 return "Standard: action=none"
 
@@ -1595,6 +1617,10 @@ class GuiBuilderApp:
             return
 
         if mode == "none":
+            return
+
+        if mode == "close":
+            self.set_status("Preview: close GUI")
             return
 
         if mode == "goto":
@@ -2918,11 +2944,65 @@ class GuiBuilderApp:
         block_specs: Dict[Tuple[Any, ...], Dict[str, Any]] = {}
         block_key_to_rep: Dict[Tuple[Any, ...], Tuple[int, int]] = {}
 
+        page_ids = self._sorted_page_ids()
+
+        def _resolved_open_page_for_button(*, pid: int, ent: Entry) -> Optional[int]:
+            if ent.tool != Tool.BUTTON_STANDARD:
+                return None
+
+            meta = ent.meta if isinstance(ent.meta, dict) else {}
+            page_change = meta.get("page_change")
+            if not isinstance(page_change, dict):
+                return None
+
+            mode = str(page_change.get("mode", "none"))
+            modulo = bool(page_change.get("modulo", False))
+            if not page_ids or mode == "none":
+                return None
+
+            if mode == "close":
+                return None
+
+            if mode == "goto":
+                try:
+                    target_id = int(page_change.get("target_page_id", pid))
+                except (TypeError, ValueError):
+                    return None
+                return int(target_id) if target_id in self.pages else None
+
+            if pid not in page_ids:
+                return None
+
+            cur_idx = page_ids.index(pid)
+            if mode == "next":
+                new_idx = cur_idx + 1
+            elif mode == "prev":
+                new_idx = cur_idx - 1
+            else:
+                return None
+
+            if modulo:
+                new_idx %= len(page_ids)
+            else:
+                if new_idx < 0 or new_idx >= len(page_ids):
+                    return None
+
+            return int(page_ids[new_idx])
+
+        def _close_gui_for_button(*, ent: Entry) -> bool:
+            if ent.tool != Tool.BUTTON_STANDARD:
+                return False
+            meta = ent.meta if isinstance(ent.meta, dict) else {}
+            page_change = meta.get("page_change")
+            if not isinstance(page_change, dict):
+                return False
+            return str(page_change.get("mode", "none")) == "close"
+
         # Collect components from all pages.
         # NOTE: Only buttons are exported as separate component textures.
         # Other component types are baked into the page background PNG, but we still include
         # them in the manifest so consumers can lay out and reference them.
-        for pid in self._sorted_page_ids():
+        for pid in page_ids:
             page = self.pages[pid]
             for ent in page.entries.values():
                 if ent.tool == Tool.BACKGROUND:
@@ -2967,6 +3047,13 @@ class GuiBuilderApp:
 
                 if self._hover_text_enabled_for(ent):
                     comp["hover_text"] = self._format_hover_tooltip_text(ent)
+
+                open_page = _resolved_open_page_for_button(pid=int(pid), ent=ent)
+                if open_page is not None:
+                    comp["open_page"] = int(open_page)
+
+                if _close_gui_for_button(ent=ent):
+                    comp["close_gui"] = True
 
                 if ent.tool == Tool.BUTTON_TOGGLE:
                     comp["toggled"] = bool(getattr(ent, "active", False))

@@ -152,6 +152,8 @@ And the component data is grouped per page:
 Components can optionally include:
 
 - `hover_text`: only present when "Show hover text" is enabled for that component
+- `open_page`: only present for standard buttons that are configured to change pages; this is the resolved target page ID
+- `close_gui`: only present for standard buttons set to "Close GUI"
 
 When exporting, you can choose:
 
