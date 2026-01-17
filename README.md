@@ -119,7 +119,11 @@ Use:
 
 - **File → Export Textures…**
 
-The exporter will also prompt you to optionally select **additional skin packs** to export (in addition to the currently selected Skin Pack).
+Export options are configured in the left panel under **Export / Inject** (no export-time popups):
+
+- Export base folder
+- Group buttons by size
+- Additional skin packs
 
 Set **GUI Name** in the left panel before exporting.
 Exports will be written under:
@@ -141,6 +145,10 @@ It also includes:
 - `gui_name`: the normalized GUI folder name used for export
 - `size`: `16` or `32` (grid size)
 
+And the component data is grouped per page:
+
+- `pages`: list of `{ "page": <page_id>, "components": [...] }`
+
 When exporting, you can choose:
 
 - **Reuse one texture per button size** (default/current behavior)
@@ -156,7 +164,12 @@ Use:
 
 - **File → Inject into Texture Pack…**
 
-The injector will also prompt you to optionally select **additional skin packs** to inject (in addition to the currently selected Skin Pack).
+Injection options are configured in the left panel under **Export / Inject** (no inject-time popups):
+
+- Pack type (folder/zip) + path
+- Manifest output folder
+- Group buttons by size
+- Additional skin packs
 
 This lets you select either:
 

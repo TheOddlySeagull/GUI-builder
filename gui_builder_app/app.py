@@ -28,7 +28,7 @@ class GuiBuilderApp:
     JSON_VERSION = 3
 
     # Exported texture sheet size (pixels). Used to pack assembled button textures.
-    EXPORT_SHEET_PX = 512
+    EXPORT_SHEET_PX = 256
 
     def __init__(self) -> None:
         self.root = tk.Tk()
@@ -40,6 +40,29 @@ class GuiBuilderApp:
         # Persistent user settings.
         self._settings: Dict[str, Any] = {}
         self._load_settings()
+
+        # Export / injection settings (persisted).
+        self.export_base_dir_var = tk.StringVar(value=str(self._settings.get("export_base_dir") or ""))
+        self.manifest_output_dir_var = tk.StringVar(value=str(self._settings.get("manifest_output_dir") or ""))
+        self.inject_pack_kind_var = tk.StringVar(value=str(self._settings.get("inject_pack_kind") or "folder"))
+        self.inject_pack_path_var = tk.StringVar(value=str(self._settings.get("inject_pack_path") or ""))
+        self.group_buttons_by_size_var = tk.BooleanVar(value=bool(self._settings.get("group_buttons_by_size", True)))
+
+        if not isinstance(self._settings.get("extra_skin_packs"), list):
+            self._settings["extra_skin_packs"] = []
+
+        # UI handles for the extra skin packs list (created in _build_ui).
+        self._extra_skin_pack_vars: Dict[str, tk.BooleanVar] = {}
+        self._extra_skin_packs_frame: Optional[tk.Frame] = None
+
+        def _persist(_: Any = None, __: Any = None, ___: Any = None) -> None:
+            self._persist_export_inject_settings()
+
+        self.export_base_dir_var.trace_add("write", _persist)
+        self.manifest_output_dir_var.trace_add("write", _persist)
+        self.inject_pack_kind_var.trace_add("write", _persist)
+        self.inject_pack_path_var.trace_add("write", _persist)
+        self.group_buttons_by_size_var.trace_add("write", _persist)
 
         # Optional texture sheet for preview rendering.
         self._texture_sheet: Optional[TextureSheet] = None
@@ -264,6 +287,133 @@ class GuiBuilderApp:
         except Exception:
             # Non-fatal.
             pass
+
+    def _persist_export_inject_settings(self) -> None:
+        self._settings["export_base_dir"] = str(self.export_base_dir_var.get() or "")
+        self._settings["manifest_output_dir"] = str(self.manifest_output_dir_var.get() or "")
+        kind = str(self.inject_pack_kind_var.get() or "folder").strip().lower()
+        self._settings["inject_pack_kind"] = "zip" if kind == "zip" else "folder"
+        self._settings["inject_pack_path"] = str(self.inject_pack_path_var.get() or "")
+        self._settings["group_buttons_by_size"] = bool(self.group_buttons_by_size_var.get())
+        if not isinstance(self._settings.get("extra_skin_packs"), list):
+            self._settings["extra_skin_packs"] = []
+        self._save_settings()
+
+    def _selected_extra_skin_packs(self) -> List[str]:
+        raw = self._settings.get("extra_skin_packs")
+        if not isinstance(raw, list):
+            return []
+        out: List[str] = []
+        for x in raw:
+            try:
+                s = str(x)
+            except Exception:
+                continue
+            if s:
+                out.append(s)
+        return out
+
+    def _set_selected_extra_skin_packs(self, packs: List[str]) -> None:
+        self._settings["extra_skin_packs"] = list(packs)
+        self._save_settings()
+
+    def _resolved_extra_skin_packs(self) -> List[str]:
+        """Return selected extra packs as real detected pack names.
+
+        Accepts either stored raw names (e.g. "TanWood") or folder names (e.g. "tanwood")
+        in .gui_builder_settings.json.
+        """
+
+        selected = set(self._selected_extra_skin_packs())
+        default_pack = str(self._skin_pack_name or "")
+        resolved: List[str] = []
+        for name in sorted(self._skin_pack_paths.keys()):
+            if name == default_pack:
+                continue
+            folder = self._skin_pack_folder_name(name)
+            if name in selected or folder in selected:
+                resolved.append(name)
+        return resolved
+
+    def _rebuild_extra_skin_packs_ui(self) -> None:
+        if self._extra_skin_packs_frame is None:
+            return
+
+        for child in list(self._extra_skin_packs_frame.winfo_children()):
+            child.destroy()
+
+        self._extra_skin_pack_vars.clear()
+
+        default_pack = str(self._skin_pack_name or "")
+        selected = set(self._selected_extra_skin_packs())
+        packs = sorted(self._skin_pack_paths.keys())
+        choices = [p for p in packs if p != default_pack]
+
+        if not choices:
+            tk.Label(self._extra_skin_packs_frame, text="(no additional skin packs detected)", anchor="w").pack(fill="x")
+            # Keep settings clean.
+            self._set_selected_extra_skin_packs([])
+            return
+
+        info = tk.Label(
+            self._extra_skin_packs_frame,
+            text=f"Default included: {default_pack}",
+            anchor="w",
+            justify="left",
+        )
+        info.pack(fill="x", pady=(0, 4))
+
+        for name in choices:
+            folder = self._skin_pack_folder_name(name)
+            v = tk.BooleanVar(value=(name in selected) or (folder in selected))
+
+            def _on_toggle(_a: Any = None, _b: Any = None, _c: Any = None) -> None:
+                picked = [n for n, vv in self._extra_skin_pack_vars.items() if bool(vv.get())]
+                self._set_selected_extra_skin_packs(picked)
+
+            v.trace_add("write", _on_toggle)
+            self._extra_skin_pack_vars[name] = v
+            tk.Checkbutton(self._extra_skin_packs_frame, text=name, variable=v, anchor="w").pack(fill="x", anchor="w")
+
+        # Drop selections that no longer exist.
+        valid = [n for n in self._selected_extra_skin_packs() if (n in choices) or (n in [self._skin_pack_folder_name(c) for c in choices])]
+        if set(valid) != set(self._selected_extra_skin_packs()):
+            # Normalize to raw names only.
+            self._set_selected_extra_skin_packs([n for n in self._resolved_extra_skin_packs()])
+
+    def _browse_export_base_dir(self) -> None:
+        initial = str(self.export_base_dir_var.get() or "")
+        initial = initial if os.path.isdir(initial) else ""
+        path = filedialog.askdirectory(title="Select export base folder", initialdir=initial)
+        if path:
+            self.export_base_dir_var.set(path)
+
+    def _browse_manifest_output_dir(self) -> None:
+        initial = str(self.manifest_output_dir_var.get() or "")
+        initial = initial if os.path.isdir(initial) else ""
+        path = filedialog.askdirectory(title="Select folder to save gui_manifest.json", initialdir=initial)
+        if path:
+            self.manifest_output_dir_var.set(path)
+
+    def _browse_inject_pack_path(self) -> None:
+        kind = str(self.inject_pack_kind_var.get() or "folder").strip().lower()
+        last = str(self._settings.get("last_resource_pack_path") or "")
+        initial_dir = last if os.path.isdir(last) else (os.path.dirname(last) if last else "")
+
+        path = ""
+        if kind == "zip":
+            path = filedialog.askopenfilename(
+                title="Select resource pack zip",
+                filetypes=[("Zip", "*.zip"), ("All files", "*.*")],
+                initialdir=initial_dir,
+            )
+        else:
+            path = filedialog.askdirectory(title="Select resource pack folder", initialdir=initial_dir)
+
+        if path:
+            self.inject_pack_path_var.set(path)
+            self._settings["last_resource_pack_path"] = path
+            self._save_settings()
 
     def _safe_gui_folder_for_pack(self) -> str:
         """Folder name for injection into a resource pack.
@@ -790,8 +940,53 @@ class GuiBuilderApp:
         tk.Label(left, text="GUI Name", font=("TkDefaultFont", 10, "bold")).pack(anchor="w", pady=(8, 0))
         tk.Entry(left, textvariable=self.gui_name_var).pack(fill="x")
 
+        # Export / inject settings panel (persisted to .gui_builder_settings.json)
+        tk.Label(left, text="Export / Inject", font=("TkDefaultFont", 10, "bold")).pack(anchor="w", pady=(8, 0))
+
+        tk.Checkbutton(
+            left,
+            text="Group buttons by size (reuse)",
+            variable=self.group_buttons_by_size_var,
+            anchor="w",
+            justify="left",
+            wraplength=210,
+        ).pack(fill="x", anchor="w")
+
+        tk.Label(left, text="Export base folder:").pack(anchor="w", pady=(6, 0))
+        row = tk.Frame(left)
+        row.pack(fill="x")
+        tk.Entry(row, textvariable=self.export_base_dir_var).pack(side="left", fill="x", expand=True)
+        tk.Button(row, text="Browse", command=self._browse_export_base_dir).pack(side="left", padx=(6, 0))
+
+        tk.Label(left, text="Inject pack:").pack(anchor="w", pady=(8, 0))
+        kind_row = tk.Frame(left)
+        kind_row.pack(fill="x")
+        tk.Radiobutton(kind_row, text="Folder", value="folder", variable=self.inject_pack_kind_var, anchor="w").pack(
+            side="left"
+        )
+        tk.Radiobutton(kind_row, text="Zip", value="zip", variable=self.inject_pack_kind_var, anchor="w").pack(
+            side="left", padx=(10, 0)
+        )
+
+        row = tk.Frame(left)
+        row.pack(fill="x")
+        tk.Entry(row, textvariable=self.inject_pack_path_var).pack(side="left", fill="x", expand=True)
+        tk.Button(row, text="Browse", command=self._browse_inject_pack_path).pack(side="left", padx=(6, 0))
+
+        tk.Label(left, text="Manifest folder (inject):").pack(anchor="w", pady=(8, 0))
+        row = tk.Frame(left)
+        row.pack(fill="x")
+        tk.Entry(row, textvariable=self.manifest_output_dir_var).pack(side="left", fill="x", expand=True)
+        tk.Button(row, text="Browse", command=self._browse_manifest_output_dir).pack(side="left", padx=(6, 0))
+
+        tk.Label(left, text="Additional skin packs:").pack(anchor="w", pady=(8, 0))
+        self._extra_skin_packs_frame = tk.Frame(left)
+        self._extra_skin_packs_frame.pack(fill="x")
+        self._rebuild_extra_skin_packs_ui()
+
         tk.Button(left, text="Export textures...", command=self.export_textures).pack(fill="x", pady=(8, 0))
         tk.Button(left, text="Export all skin packs...", command=self.export_all_skin_packs).pack(fill="x")
+        tk.Button(left, text="Inject into texture pack...", command=self.inject_into_texture_pack).pack(fill="x", pady=(4, 0))
 
         self.preview_btn = tk.Button(left, text="Preview: OFF", command=self.toggle_preview)
         self.preview_btn.pack(fill="x", pady=(6, 0))
@@ -1670,6 +1865,8 @@ class GuiBuilderApp:
                 self.skin_pack_var.set(only)
             self._on_skin_pack_changed(only)
 
+        self._rebuild_extra_skin_packs_ui()
+
     def _on_skin_pack_changed(self, selection: str) -> None:
         name = str(selection)
         if name == self._skin_pack_name:
@@ -1687,6 +1884,7 @@ class GuiBuilderApp:
         if name == "(none)":
             self.set_status("Skin pack: none (using colors)")
             self.redraw()
+            self._rebuild_extra_skin_packs_ui()
             return
 
         modules_path = self._skin_pack_modules_path()
@@ -1713,6 +1911,8 @@ class GuiBuilderApp:
         else:
             self.set_status(f"Skin pack: {name}")
         self.redraw()
+
+        self._rebuild_extra_skin_packs_ui()
 
     def _scale_factors(self) -> Tuple[int, int]:
         """Return (zoom, subsample) factors so: TILE_PX * zoom / subsample ~= cell_px."""
@@ -2017,6 +2217,34 @@ class GuiBuilderApp:
                 messagebox.showerror("Export textures", f"Failed writing gui_manifest.json:\n{e}")
             return False
         return True
+
+    def _manifest_pages_payload(self, components: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Group flat component list into per-page entries for the manifest."""
+
+        # Build a lookup by page id.
+        comps_by_page: Dict[int, List[Dict[str, Any]]] = {}
+        for c in components:
+            page = int((c.get("offset") or {}).get("page") or 0)
+            comps_by_page.setdefault(page, []).append(c)
+
+        pages_payload: List[Dict[str, Any]] = []
+        for pid in self._sorted_page_ids():
+            pid_i = int(pid)
+            page_components: List[Dict[str, Any]] = []
+            for c in comps_by_page.get(pid_i, []):
+                cc = dict(c)
+                off = cc.get("offset")
+                if isinstance(off, dict) and "page" in off:
+                    off2 = dict(off)
+                    del off2["page"]
+                    cc["offset"] = off2
+                page_components.append(cc)
+
+            # Stable ordering within a page.
+            page_components.sort(key=lambda x: int(x.get("id", 0)))
+            pages_payload.append({"page": pid_i, "components": page_components})
+
+        return pages_payload
 
     def _ask_additional_skin_packs(self, *, default_pack: str, title: str) -> Optional[List[str]]:
         """Ask the user which *additional* skin packs to export/inject.
@@ -2814,45 +3042,26 @@ class GuiBuilderApp:
             )
             return
 
-        group_by_size = self._ask_export_button_grouping()
-        if group_by_size is None:
-            return
+        group_by_size = bool(self.group_buttons_by_size_var.get())
 
-        extra_packs = self._ask_additional_skin_packs(
-            default_pack=str(self._skin_pack_name),
-            title="Inject into Texture Pack",
-        )
-        if extra_packs is None:
-            return
+        extra_packs = self._resolved_extra_skin_packs()
         packs_to_inject = [str(self._skin_pack_name)] + [p for p in extra_packs if p != str(self._skin_pack_name)]
         pack_folders_to_inject = [self._skin_pack_folder_name(p) for p in packs_to_inject]
 
-        pack_kind = messagebox.askyesnocancel(
-            "Inject into Texture Pack",
-            "Select resource pack type:\n\nYes: Folder\nNo: Zip (.zip)\nCancel: abort",
-            default="yes",
-        )
-        if pack_kind is None:
-            return
-
-        last_pack = str(self._settings.get("last_resource_pack_path") or "")
-        initial_dir = last_pack if os.path.isdir(last_pack) else (os.path.dirname(last_pack) if last_pack else "")
-
-        pack_path = ""
-        if pack_kind:
-            pack_path = filedialog.askdirectory(title="Select resource pack folder", initialdir=initial_dir)
-        else:
-            pack_path = filedialog.askopenfilename(
-                title="Select resource pack zip",
-                filetypes=[("Zip", "*.zip"), ("All files", "*.*")],
-                initialdir=initial_dir,
-            )
-
+        kind = str(self.inject_pack_kind_var.get() or "folder").strip().lower()
+        pack_path = str(self.inject_pack_path_var.get() or "").strip()
         if not pack_path:
+            messagebox.showerror("Inject into Texture Pack", "No resource pack path configured.\n\nSet it in the left panel (Export / Inject).")
             return
 
-        self._settings["last_resource_pack_path"] = pack_path
-        self._save_settings()
+        if kind == "zip":
+            if not os.path.isfile(pack_path):
+                messagebox.showerror("Inject into Texture Pack", f"Zip does not exist:\n{pack_path}")
+                return
+        else:
+            if not os.path.isdir(pack_path):
+                messagebox.showerror("Inject into Texture Pack", f"Folder does not exist:\n{pack_path}")
+                return
 
         plan = self._plan_component_sheet_layout(group_buttons_by_size=bool(group_by_size))
         if plan is None:
@@ -2863,7 +3072,7 @@ class GuiBuilderApp:
         previous_pack = self._skin_pack_name
 
         # Writer that targets a folder pack.
-        if os.path.isdir(pack_path):
+        if kind != "zip":
             gui_dir = os.path.join(pack_path, *base_prefix.split("/"))
             if not self._reset_export_dir(gui_dir, quiet=True):
                 messagebox.showerror("Inject into Texture Pack", f"Failed preparing pack folder:\n{gui_dir}")
@@ -2892,9 +3101,6 @@ class GuiBuilderApp:
                 self._on_skin_pack_changed(previous_pack)
         else:
             # Zip pack: remove existing gui folder prefix then append new files.
-            if not os.path.exists(pack_path):
-                messagebox.showerror("Inject into Texture Pack", f"Zip does not exist:\n{pack_path}")
-                return
             if not self._zip_remove_prefix(pack_path, base_prefix):
                 messagebox.showerror("Inject into Texture Pack", f"Failed cleaning existing paths in zip:\n{base_prefix}")
                 return
@@ -2932,8 +3138,18 @@ class GuiBuilderApp:
                     return
 
         # Manifest JSON saved separately.
-        base_out_dir = filedialog.askdirectory(title="Select folder to save gui_manifest.json")
+        base_out_dir = str(self.manifest_output_dir_var.get() or "").strip()
         if not base_out_dir:
+            messagebox.showerror(
+                "Inject into Texture Pack",
+                "No manifest output folder configured.\n\nSet it in the left panel (Export / Inject).",
+            )
+            return
+
+        try:
+            os.makedirs(base_out_dir, exist_ok=True)
+        except Exception as e:
+            messagebox.showerror("Inject into Texture Pack", f"Failed creating manifest folder:\n{base_out_dir}\n\n{e}")
             return
 
         gui_root = os.path.join(base_out_dir, self._safe_gui_name(self.gui_name_var.get()))
@@ -2941,11 +3157,11 @@ class GuiBuilderApp:
             return
 
         gui_manifest: Dict[str, Any] = {
-            "version": 2,
+            "version": 3,
             "gui_name": gui_folder,
             "size": int(self.grid_n),
             "skin_packs": pack_folders_to_inject,
-            "components": plan.get("components") or [],
+            "pages": self._manifest_pages_payload(plan.get("components") or []),
         }
         if not self._write_gui_manifest(gui_root, gui_manifest):
             return
@@ -2967,21 +3183,21 @@ class GuiBuilderApp:
             )
             return
 
-        group_by_size = self._ask_export_button_grouping()
-        if group_by_size is None:
-            return
+        group_by_size = bool(self.group_buttons_by_size_var.get())
 
-        extra_packs = self._ask_additional_skin_packs(
-            default_pack=str(self._skin_pack_name),
-            title="Export textures",
-        )
-        if extra_packs is None:
-            return
+        extra_packs = self._resolved_extra_skin_packs()
         packs_to_export = [str(self._skin_pack_name)] + [p for p in extra_packs if p != str(self._skin_pack_name)]
         pack_folders_to_export = [self._skin_pack_folder_name(p) for p in packs_to_export]
 
-        base_out_dir = filedialog.askdirectory(title="Export base folder")
+        base_out_dir = str(self.export_base_dir_var.get() or "").strip()
         if not base_out_dir:
+            messagebox.showerror("Export textures", "No export base folder configured.\n\nSet it in the left panel (Export / Inject).")
+            return
+
+        try:
+            os.makedirs(base_out_dir, exist_ok=True)
+        except Exception as e:
+            messagebox.showerror("Export textures", f"Failed creating export base folder:\n{base_out_dir}\n\n{e}")
             return
 
         gui_safe_name = self._safe_gui_name(self.gui_name_var.get())
@@ -3017,11 +3233,11 @@ class GuiBuilderApp:
 
         # Minimal, theme-independent manifest.
         gui_manifest: Dict[str, Any] = {
-            "version": 2,
+            "version": 3,
             "gui_name": gui_safe_name,
             "size": int(self.grid_n),
             "skin_packs": pack_folders_to_export,
-            "components": plan.get("components") or [],
+            "pages": self._manifest_pages_payload(plan.get("components") or []),
         }
 
         if not self._write_gui_manifest(gui_root, gui_manifest):
@@ -3058,9 +3274,7 @@ class GuiBuilderApp:
         # Refresh list first so we export what's actually on disk.
         self._scan_skin_packs()
 
-        group_by_size = self._ask_export_button_grouping()
-        if group_by_size is None:
-            return
+        group_by_size = bool(self.group_buttons_by_size_var.get())
 
         packs = sorted(self._skin_pack_paths.keys())
         pack_folders = [self._skin_pack_folder_name(p) for p in packs]
@@ -3071,8 +3285,18 @@ class GuiBuilderApp:
             )
             return
 
-        base_out_dir = filedialog.askdirectory(title="Export base folder")
+        base_out_dir = str(self.export_base_dir_var.get() or "").strip()
         if not base_out_dir:
+            messagebox.showerror(
+                "Export all skin packs",
+                "No export base folder configured.\n\nSet it in the left panel (Export / Inject).",
+            )
+            return
+
+        try:
+            os.makedirs(base_out_dir, exist_ok=True)
+        except Exception as e:
+            messagebox.showerror("Export all skin packs", f"Failed creating export base folder:\n{base_out_dir}\n\n{e}")
             return
 
         gui_safe_name = self._safe_gui_name(self.gui_name_var.get())
@@ -3090,11 +3314,11 @@ class GuiBuilderApp:
 
         # Minimal, theme-independent manifest.
         gui_manifest: Dict[str, Any] = {
-            "version": 2,
+            "version": 3,
             "gui_name": gui_safe_name,
             "size": int(self.grid_n),
             "skin_packs": pack_folders,
-            "components": plan.get("components") or [],
+            "pages": self._manifest_pages_payload(plan.get("components") or []),
         }
 
         if not self._write_gui_manifest(gui_root, gui_manifest, quiet=True):
