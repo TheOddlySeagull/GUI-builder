@@ -3045,6 +3045,13 @@ class GuiBuilderApp:
                     "label": self._component_label_for_entry(ent),
                 }
 
+                if str(comp_type) == "scroll_list":
+                    raw_items = str(ent.label or "")
+                    items = [s.strip() for s in raw_items.split(",")]
+                    items = [s for s in items if s]
+                    comp["items"] = items
+                    comp.pop("label", None)
+
                 if self._hover_text_enabled_for(ent):
                     comp["hover_text"] = self._format_hover_tooltip_text(ent)
 

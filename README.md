@@ -155,6 +155,10 @@ Components can optionally include:
 - `open_page`: only present for standard buttons that are configured to change pages; this is the resolved target page ID
 - `close_gui`: only present for standard buttons set to "Close GUI"
 
+For `scroll_list` components:
+
+- `items`: the list options parsed from the component text, split on commas and trimmed (`label` is not exported for scroll lists)
+
 When exporting, you can choose:
 
 - **Reuse one texture per button size** (default/current behavior)
