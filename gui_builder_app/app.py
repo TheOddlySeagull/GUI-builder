@@ -96,6 +96,9 @@ class GuiBuilderApp:
 
         self.current_tool: Tool = Tool.BACKGROUND
         self.preview_mode = False
+        # Used by the menubar Preview checkbutton (and kept in sync with preview_mode).
+        self.preview_mode_var = tk.BooleanVar(value=self.preview_mode)
+        self._syncing_preview_mode = False
 
         # Editor selection state (right-click)
         self.selected_entry_id: Optional[int] = None
@@ -263,7 +266,55 @@ class GuiBuilderApp:
         filemenu.add_separator()
         filemenu.add_command(label="Quit", command=self.root.quit)
         menubar.add_cascade(label="File", menu=filemenu)
+
+        previewmenu = tk.Menu(menubar, tearoff=0)
+
+        def _on_preview_menu_toggle() -> None:
+            self._set_preview_mode(bool(self.preview_mode_var.get()))
+
+        previewmenu.add_checkbutton(
+            label="Preview Mode",
+            variable=self.preview_mode_var,
+            command=_on_preview_menu_toggle,
+        )
+        previewmenu.add_separator()
+        previewmenu.add_command(label="Rescan Skin Packs", command=self._scan_skin_packs)
+        menubar.add_cascade(label="Preview", menu=previewmenu)
+
         self.root.config(menu=menubar)
+
+    def _set_preview_mode(self, enabled: bool) -> None:
+        if enabled == self.preview_mode:
+            return
+
+        self.preview_mode = bool(enabled)
+
+        if hasattr(self, "preview_btn"):
+            self.preview_btn.configure(text=f"Preview: {'ON' if self.preview_mode else 'OFF'}")
+
+        # Clear any held press interaction when switching modes
+        self._preview_pressed_entry_id = None
+
+        # Clear hover state and tooltip when switching modes
+        self._preview_hover_entry_id = None
+        if hasattr(self, "canvas"):
+            self.canvas.delete("hover_tip")
+
+        if self.preview_mode and self._texture_sheet is None:
+            self.set_status("Mode: PREVIEW (interactive) | No skin pack selected (using colors)")
+        else:
+            self.set_status(f"Mode: {'PREVIEW (interactive)' if self.preview_mode else 'EDIT'}")
+
+        # Keep the menu checkbutton state in sync.
+        try:
+            if not self._syncing_preview_mode:
+                self._syncing_preview_mode = True
+                if bool(self.preview_mode_var.get()) != bool(self.preview_mode):
+                    self.preview_mode_var.set(bool(self.preview_mode))
+        finally:
+            self._syncing_preview_mode = False
+
+        self.redraw()
 
     def _settings_path(self) -> str:
         return os.path.join(self._assets_base_dir(), ".gui_builder_settings.json")
@@ -605,12 +656,65 @@ class GuiBuilderApp:
         right = tk.Frame(outer, padx=8, pady=8)
         right.pack(side="right", fill="both", expand=True)
 
-        tk.Label(left, text="Tools", font=("TkDefaultFont", 10, "bold")).pack(anchor="w")
+        # ----------------------------
+        # Sidebar styling helpers
+        # ----------------------------
+
+        def _rgb16_to_hex(r: int, g: int, b: int) -> str:
+            # winfo_rgb returns 0..65535
+            return f"#{r // 256:02x}{g // 256:02x}{b // 256:02x}"
+
+        def _blend(color_a: str, color_b: str, t: float) -> str:
+            """Blend two Tk colors (0..1). Falls back to color_a on failures."""
+
+            try:
+                ar, ag, ab = self.root.winfo_rgb(color_a)
+                br, bg, bb = self.root.winfo_rgb(color_b)
+                t2 = max(0.0, min(1.0, float(t)))
+                rr = int(ar + (br - ar) * t2)
+                rg = int(ag + (bg - ag) * t2)
+                rb = int(ab + (bb - ab) * t2)
+                return _rgb16_to_hex(rr, rg, rb)
+            except Exception:
+                return color_a
+
+        base_bg = str(self.root.cget("bg") or "SystemButtonFace")
+        section_bg = _blend(base_bg, "#ffffff", 0.06)
+        title_bg = _blend(base_bg, "#000000", 0.04)
+
+        def _section(parent: tk.Misc, title: str) -> Tuple[tk.Frame, tk.Frame, tk.Label]:
+            outer_sec = tk.Frame(parent, bd=1, relief="groove", bg=section_bg)
+            title_lbl = tk.Label(
+                outer_sec,
+                text=title,
+                font=("TkDefaultFont", 10, "bold"),
+                bg=title_bg,
+                anchor="w",
+            )
+            title_lbl.pack(fill="x", padx=6, pady=(6, 4))
+            body = tk.Frame(outer_sec, bg=section_bg)
+            body.pack(fill="x", padx=6, pady=(0, 6))
+            return outer_sec, body, title_lbl
+
+        # Sidebar ordering:
+        # GUI Name -> Grid -> Tools -> Pages -> Selected Element -> Preview -> Export/Inject
+
+        gui_sec, gui_body, _ = _section(left, "GUI Name")
+        gui_sec.pack(fill="x", pady=(0, 8))
+        tk.Entry(gui_body, textvariable=self.gui_name_var).pack(fill="x")
+
+        grid_sec, grid_body, _ = _section(left, "Grid")
+        grid_sec.pack(fill="x", pady=(0, 8))
+        self.grid_btn = tk.Button(grid_body, text="Toggle 16×16 / 32×32", command=self.toggle_grid)
+        self.grid_btn.pack(fill="x")
+
+        tools_sec, tools_body, _ = _section(left, "Tools")
+        tools_sec.pack(fill="x", pady=(0, 8))
         self.tool_var = tk.StringVar(value=self.current_tool.value)
 
         for t in Tool:
             rb = tk.Radiobutton(
-                left,
+                tools_body,
                 text=t.value,
                 value=t.value,
                 variable=self.tool_var,
@@ -621,13 +725,13 @@ class GuiBuilderApp:
             )
             rb.pack(fill="x", anchor="w")
 
-        tk.Label(left, text="").pack()
+        pages_sec, pages_body, _ = _section(left, "Pages")
+        pages_sec.pack(fill="x", pady=(0, 8))
 
-        tk.Label(left, text="Page", font=("TkDefaultFont", 10, "bold")).pack(anchor="w")
         self.page_count_var = tk.StringVar(value=f"Pages: {len(self.pages)}")
-        tk.Label(left, textvariable=self.page_count_var, anchor="w", justify="left").pack(fill="x")
+        tk.Label(pages_body, textvariable=self.page_count_var, anchor="w", justify="left", bg=section_bg).pack(fill="x")
 
-        page_ctrl = tk.Frame(left)
+        page_ctrl = tk.Frame(pages_body, bg=section_bg)
         page_ctrl.pack(fill="x", pady=(2, 0))
 
         tk.Button(page_ctrl, text="<", width=3, command=self.goto_prev_page).pack(side="left")
@@ -648,17 +752,13 @@ class GuiBuilderApp:
         self.page_entry.bind("<Return>", on_page_enter)
         self.page_entry.bind("<FocusOut>", on_page_enter)
 
-        tk.Button(left, text="New Page", command=self.add_page).pack(fill="x", pady=(4, 0))
-        tk.Button(left, text="Delete Page", command=self.delete_current_page).pack(fill="x")
-
-        tk.Label(left, text="").pack()
+        tk.Button(pages_body, text="New Page", command=self.add_page).pack(fill="x", pady=(4, 0))
+        tk.Button(pages_body, text="Delete Page", command=self.delete_current_page).pack(fill="x")
 
         # Tool-specific metadata panel (only visible for standard buttons)
-        self.std_btn_meta_frame = tk.Frame(left)
-        self.std_btn_meta_frame.pack(fill="x")
-
-        tk.Label(self.std_btn_meta_frame, text="Standard Button", font=("TkDefaultFont", 10, "bold")).pack(anchor="w")
-        tk.Label(self.std_btn_meta_frame, text="Action: change page", anchor="w").pack(anchor="w")
+        self.std_btn_section, self.std_btn_meta_frame, _ = _section(left, "Standard Button")
+        self.std_btn_section.pack(fill="x", pady=(0, 8))
+        tk.Label(self.std_btn_meta_frame, text="Action: change page", anchor="w", bg=section_bg).pack(anchor="w")
 
         self.std_btn_action_var = tk.StringVar(value=self.standard_button_tool_meta["page_change"]["mode"])
         self.std_btn_target_var = tk.StringVar(value=str(self.standard_button_tool_meta["page_change"]["target_page_id"]))
@@ -739,15 +839,12 @@ class GuiBuilderApp:
             wraplength=210,
         ).pack(fill="x", anchor="w", pady=(2, 0))
 
-        tk.Label(left, text="").pack()
-
         # Selected element meta panel (right-click an element in EDIT mode)
-        self.selection_frame = tk.Frame(left)
-        self.selection_frame.pack(fill="x")
+        self.selection_section, self.selection_frame, _ = _section(left, "Selected Element")
+        self.selection_section.pack(fill="x", pady=(0, 8))
 
-        tk.Label(self.selection_frame, text="Selected Element", font=("TkDefaultFont", 10, "bold")).pack(anchor="w")
         self.selected_info_var = tk.StringVar(value="(none)")
-        tk.Label(self.selection_frame, textvariable=self.selected_info_var, anchor="w", justify="left").pack(fill="x")
+        tk.Label(self.selection_frame, textvariable=self.selected_info_var, anchor="w", justify="left", bg=section_bg).pack(fill="x")
 
         self.sel_hover_enabled_var = tk.BooleanVar(value=False)
         self.sel_hover_text_var = tk.StringVar(value="")
@@ -797,7 +894,7 @@ class GuiBuilderApp:
             wraplength=210,
         ).pack(fill="x", anchor="w")
 
-        tk.Label(self.selection_frame, text="Text (optional):", anchor="w").pack(anchor="w")
+        tk.Label(self.selection_frame, text="Text (optional):", anchor="w", bg=section_bg).pack(anchor="w")
         sel_text_entry = tk.Entry(self.selection_frame, textvariable=self.sel_hover_text_var)
         sel_text_entry.pack(fill="x")
         sel_text_entry.bind("<KeyRelease>", lambda _e: apply_selected_meta())
@@ -923,28 +1020,29 @@ class GuiBuilderApp:
         self.clear_selection_btn.pack(fill="x", pady=(4, 0))
 
         # Start hidden until something is selected.
-        self.selection_frame.pack_forget()
+        self.selection_section.pack_forget()
 
-        self.grid_section_label = tk.Label(left, text="Grid", font=("TkDefaultFont", 10, "bold"))
-        self.grid_section_label.pack(anchor="w")
-        self.grid_btn = tk.Button(left, text="Toggle 16×16 / 32×32", command=self.toggle_grid)
-        self.grid_btn.pack(fill="x")
+        # Preview (overall)
+        self.preview_section_frame, preview_body, _ = _section(left, "Preview")
+        self.preview_section_frame.pack(fill="x", pady=(0, 8))
+        self.preview_btn = tk.Button(preview_body, text="Preview: OFF", command=self.toggle_preview)
+        self.preview_btn.pack(fill="x")
 
-        tk.Label(left, text="Skin Pack", font=("TkDefaultFont", 10, "bold")).pack(anchor="w", pady=(8, 0))
+        tk.Label(preview_body, text="Skin Pack", bg=section_bg).pack(anchor="w", pady=(6, 0))
         self.skin_pack_var = tk.StringVar(value="(none)")
-        self.skin_pack_menu = tk.OptionMenu(left, self.skin_pack_var, "(none)", command=self._on_skin_pack_changed)
+        self.skin_pack_menu = tk.OptionMenu(preview_body, self.skin_pack_var, "(none)", command=self._on_skin_pack_changed)
         self.skin_pack_menu.pack(fill="x")
 
-        tk.Button(left, text="Rescan skin packs", command=self._scan_skin_packs).pack(fill="x", pady=(4, 0))
-
-        tk.Label(left, text="GUI Name", font=("TkDefaultFont", 10, "bold")).pack(anchor="w", pady=(8, 0))
-        tk.Entry(left, textvariable=self.gui_name_var).pack(fill="x")
-
         # Export / inject settings panel (persisted to .gui_builder_settings.json)
-        tk.Label(left, text="Export / Inject", font=("TkDefaultFont", 10, "bold")).pack(anchor="w", pady=(8, 0))
+        export_sec, export_body, _ = _section(left, "Export / Inject")
+        export_sec.pack(fill="x", pady=(0, 8))
+
+        tk.Label(export_body, text="(Use File menu to export/inject)", anchor="w", justify="left", wraplength=210, bg=section_bg).pack(
+            anchor="w", pady=(0, 2)
+        )
 
         tk.Checkbutton(
-            left,
+            export_body,
             text="Group buttons by size (reuse)",
             variable=self.group_buttons_by_size_var,
             anchor="w",
@@ -952,14 +1050,14 @@ class GuiBuilderApp:
             wraplength=210,
         ).pack(fill="x", anchor="w")
 
-        tk.Label(left, text="Export base folder:").pack(anchor="w", pady=(6, 0))
-        row = tk.Frame(left)
+        tk.Label(export_body, text="Export base folder:", bg=section_bg).pack(anchor="w", pady=(6, 0))
+        row = tk.Frame(export_body, bg=section_bg)
         row.pack(fill="x")
         tk.Entry(row, textvariable=self.export_base_dir_var).pack(side="left", fill="x", expand=True)
         tk.Button(row, text="Browse", command=self._browse_export_base_dir).pack(side="left", padx=(6, 0))
 
-        tk.Label(left, text="Inject pack:").pack(anchor="w", pady=(8, 0))
-        kind_row = tk.Frame(left)
+        tk.Label(export_body, text="Inject pack:", bg=section_bg).pack(anchor="w", pady=(8, 0))
+        kind_row = tk.Frame(export_body, bg=section_bg)
         kind_row.pack(fill="x")
         tk.Radiobutton(kind_row, text="Folder", value="folder", variable=self.inject_pack_kind_var, anchor="w").pack(
             side="left"
@@ -968,28 +1066,23 @@ class GuiBuilderApp:
             side="left", padx=(10, 0)
         )
 
-        row = tk.Frame(left)
+        row = tk.Frame(export_body, bg=section_bg)
         row.pack(fill="x")
         tk.Entry(row, textvariable=self.inject_pack_path_var).pack(side="left", fill="x", expand=True)
         tk.Button(row, text="Browse", command=self._browse_inject_pack_path).pack(side="left", padx=(6, 0))
 
-        tk.Label(left, text="Manifest folder (inject):").pack(anchor="w", pady=(8, 0))
-        row = tk.Frame(left)
+        tk.Label(export_body, text="Manifest folder (inject):", bg=section_bg).pack(anchor="w", pady=(8, 0))
+        row = tk.Frame(export_body, bg=section_bg)
         row.pack(fill="x")
         tk.Entry(row, textvariable=self.manifest_output_dir_var).pack(side="left", fill="x", expand=True)
         tk.Button(row, text="Browse", command=self._browse_manifest_output_dir).pack(side="left", padx=(6, 0))
 
-        tk.Label(left, text="Additional skin packs:").pack(anchor="w", pady=(8, 0))
-        self._extra_skin_packs_frame = tk.Frame(left)
+        tk.Label(export_body, text="Additional skin packs:", bg=section_bg).pack(anchor="w", pady=(8, 0))
+        self._extra_skin_packs_frame = tk.Frame(export_body, bg=section_bg)
         self._extra_skin_packs_frame.pack(fill="x")
         self._rebuild_extra_skin_packs_ui()
 
-        tk.Button(left, text="Export textures...", command=self.export_textures).pack(fill="x", pady=(8, 0))
-        tk.Button(left, text="Export all skin packs...", command=self.export_all_skin_packs).pack(fill="x")
-        tk.Button(left, text="Inject into texture pack...", command=self.inject_into_texture_pack).pack(fill="x", pady=(4, 0))
-
-        self.preview_btn = tk.Button(left, text="Preview: OFF", command=self.toggle_preview)
-        self.preview_btn.pack(fill="x", pady=(6, 0))
+        # NOTE: Export/Inject actions are intentionally only in the File menu.
 
         tk.Label(left, text="").pack()
 
@@ -1132,9 +1225,11 @@ class GuiBuilderApp:
             return
 
         if self.current_tool == Tool.BUTTON_STANDARD:
-            self.std_btn_meta_frame.pack(fill="x")
+            if hasattr(self, "std_btn_section") and not self.std_btn_section.winfo_ismapped():
+                self.std_btn_section.pack(fill="x", pady=(0, 8))
         else:
-            self.std_btn_meta_frame.pack_forget()
+            if hasattr(self, "std_btn_section") and self.std_btn_section.winfo_ismapped():
+                self.std_btn_section.pack_forget()
 
         if hasattr(self, "std_btn_target_row") and hasattr(self, "std_btn_action_var"):
             if self.std_btn_action_var.get() == "goto":
@@ -1148,8 +1243,8 @@ class GuiBuilderApp:
 
         ent = self.entries.get(self.selected_entry_id) if self.selected_entry_id is not None else None
         if not ent:
-            if self.selection_frame.winfo_ismapped():
-                self.selection_frame.pack_forget()
+            if hasattr(self, "selection_section") and self.selection_section.winfo_ismapped():
+                self.selection_section.pack_forget()
             self.selected_info_var.set("(none)")
             self.sel_hover_enabled_var.set(False)
             self.sel_hover_text_var.set("")
@@ -1163,11 +1258,11 @@ class GuiBuilderApp:
             return
 
         # Ensure the selection panel is visible in its intended position.
-        if not self.selection_frame.winfo_ismapped():
-            if hasattr(self, "grid_section_label"):
-                self.selection_frame.pack(fill="x", before=self.grid_section_label)
+        if hasattr(self, "selection_section") and not self.selection_section.winfo_ismapped():
+            if hasattr(self, "preview_section_frame") and self.preview_section_frame.winfo_exists():
+                self.selection_section.pack(fill="x", pady=(0, 8), before=self.preview_section_frame)
             else:
-                self.selection_frame.pack(fill="x")
+                self.selection_section.pack(fill="x", pady=(0, 8))
 
         if ent.uid:
             self.selected_info_var.set(f"UID {ent.uid} | ID {ent.entry_id} | {ent.tool.value}")
@@ -1753,21 +1848,7 @@ class GuiBuilderApp:
     # ----------------------------
 
     def toggle_preview(self) -> None:
-        self.preview_mode = not self.preview_mode
-        self.preview_btn.configure(text=f"Preview: {'ON' if self.preview_mode else 'OFF'}")
-
-        # Clear any held press interaction when switching modes
-        self._preview_pressed_entry_id = None
-
-        # Clear hover state and tooltip when switching modes
-        self._preview_hover_entry_id = None
-        self.canvas.delete("hover_tip")
-
-        if self.preview_mode and self._texture_sheet is None:
-            self.set_status("Mode: PREVIEW (interactive) | No skin pack selected (using colors)")
-        else:
-            self.set_status(f"Mode: {'PREVIEW (interactive)' if self.preview_mode else 'EDIT'}")
-        self.redraw()
+        self._set_preview_mode(not self.preview_mode)
 
     def toggle_grid(self) -> None:
         new_n = 32 if self.grid_n == 16 else 16
