@@ -99,10 +99,13 @@ The background borders come from the `background_border` module in the atlas and
 
 - Use **File → Save JSON…** and **File → Load JSON…**
 - Current format is `version: 3` with:
+  - `gui_name` (the GUI Name field)
   - `grid_n` (16 or 32)
   - `start_page_id`
   - `available_in_skin_packs` (names detected at export time)
   - `pages[]` with `background_rects[]` and `entries[]`
+
+When using **File → Save JSON…**, the default filename is `<gui_name>.json`.
 
 An example export lives in:
 

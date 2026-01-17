@@ -1788,6 +1788,7 @@ class GuiBuilderApp:
 
         return {
             "version": self.JSON_VERSION,
+            "gui_name": str(self.gui_name_var.get() or ""),
             "grid_n": self.grid_n,
             "start_page_id": self.start_page_id,
             "next_uid": self.next_uid,
@@ -1847,6 +1848,13 @@ class GuiBuilderApp:
     def load_from_json_dict(self, data: dict) -> None:
         if not isinstance(data, dict):
             raise ValueError("Invalid JSON root (expected object).")
+
+        if "gui_name" in data:
+            try:
+                self.gui_name_var.set(str(data.get("gui_name") or ""))
+            except Exception:
+                # Keep existing GUI name if the value is invalid.
+                pass
 
         version = data.get("version")
         if version not in (1, 2, 3):
@@ -1994,10 +2002,12 @@ class GuiBuilderApp:
         self._set_current_page(self.start_page_id)
 
     def save_json(self) -> None:
+        default_filename = f"{self._safe_gui_name(self.gui_name_var.get())}.json"
         path = filedialog.asksaveasfilename(
             defaultextension=".json",
             filetypes=[("JSON", "*.json"), ("All files", "*.*")],
             title="Save GUI JSON",
+            initialfile=default_filename,
         )
         if not path:
             return

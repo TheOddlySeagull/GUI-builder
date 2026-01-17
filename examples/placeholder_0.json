@@ -1,5 +1,6 @@
 {
   "version": 3,
+  "gui_name": "item_purchase",
   "grid_n": 16,
   "start_page_id": 1,
   "next_uid": 14,
