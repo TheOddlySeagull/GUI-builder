@@ -3114,10 +3114,6 @@ class GuiBuilderApp:
 
                 if ent.tool == Tool.BUTTON_TOGGLE:
                     comp["toggled"] = bool(getattr(ent, "active", False))
-                    # Backward compatibility with JS consumers that only understand `disabled`.
-                    # Locked toggle buttons are exported as disabled so they cannot be interacted with.
-                    if bool(meta.get("locked", False)):
-                        comp["disabled"] = True
 
                 if needs_texture:
                     # Default: one unique texture block per component.
@@ -3280,6 +3276,19 @@ class GuiBuilderApp:
                         if w_px > 0 and h_px > 0:
                             c["toggle_tex"] = {"x": int(pos["x"]) + w_px, "y": int(pos["y"])}
                             c["disabled_tex"] = {"x": int(pos["x"]) + w_px, "y": int(pos["y"]) + h_px}
+                    except Exception:
+                        pass
+
+                # Standard buttons expose a disabled_tex pointing to the "locked" quadrant.
+                # (Our block is 2x2: base TL, hover BL, locked TR, locked_hover BR)
+                if str(c.get("type")) == "button":
+                    try:
+                        size = c.get("size_tiles") or {}
+                        w_tiles = int(size.get("w") or 0)
+                        h_tiles = int(size.get("h") or 0)
+                        w_px = int(w_tiles) * int(TILE_PX)
+                        if w_px > 0:
+                            c["disabled_tex"] = {"x": int(pos["x"]) + w_px, "y": int(pos["y"])}
                     except Exception:
                         pass
             if "_block_key" in c:
