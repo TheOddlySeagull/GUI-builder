@@ -7,7 +7,6 @@ function loadJson(filePath) {
         content += line;
     }
     bufferedReader.close();
-    // if empty, return null
     if (content.trim() === "") {
         return null;
     }
@@ -27,13 +26,6 @@ function findJsonEntry(json, key, value) {
 function tellPlayer(player, message) {
     player.message('§a[GUI Builder] §f' + message);
 }
-
-//////////////////////////////////////////////////////////////////////////////////
-
-// load('world/customnpcs/scripts/ecmascript/gramados_utils/utils_files.js');
-// load('world/customnpcs/scripts/ecmascript/gramados_utils/utils_general.js');
-
-//////////////////////////////////////////////////////////////////////////////////
 
 var TILE_SCALE = 16;
 var ITEM_OFFSET_X = -2.5;
@@ -153,7 +145,42 @@ function guiBuilder_buildScrollList(GUI, component) {
     guiBuilder_buildMeta(GUI, id, component);
 }
 
+function guiBuilder_buildDisabledButton(GUI, component) {
+    var toggled = !!component.toggled;
+    var locked = !!component.locked;
+
+    var textureX = component.tex.x;
+    var textureY = component.tex.y;
+
+    if (locked) {
+        if (toggled) {
+            textureX = component.toggle_disabled_tex.x;
+            textureY = component.toggle_disabled_tex.y;
+        } else {
+            textureX = component.disabled_tex.x;
+            textureY = component.disabled_tex.y;
+        }
+    } else if (toggled) {
+        textureX = component.toggle_tex.x;
+        textureY = component.toggle_tex.y;
+    }
+    var id = component.id;
+    var posX = component.offset.x * TILE_SCALE;
+    var posY = component.offset.y * TILE_SCALE;
+    var sizeW = component.size_tiles.w * TILE_SCALE;
+    var sizeH = component.size_tiles.h * TILE_SCALE;
+    var sheetTexture = guiBuilder_sheetTexture(component.sheet);
+
+    GUI.addTexturedRect(id, sheetTexture, posX, posY, sizeW, sizeH, textureX, textureY);
+    guiBuilder_buildMeta(GUI, id, component);
+
+}
+
 function guiBuilder_buildButton(GUI, component) {
+    if (component.locked) {
+        guiBuilder_buildDisabledButton(GUI, component);
+        return;
+    }
     var id = component.id;
     var posX = component.offset.x * TILE_SCALE;
     var posY = component.offset.y * TILE_SCALE;
@@ -176,6 +203,10 @@ function guiBuilder_updateToggleButton(GUI, component, player) {
 }
 
 function guiBuilder_buildToggleButton(GUI, component) {
+    if (component.locked) {
+        guiBuilder_buildDisabledButton(GUI, component);
+        return;
+    }
     var toggled = !!component.toggled;
     var disabled = !!component.disabled;
 
@@ -356,8 +387,6 @@ function guiBuilder_pickSkinPack(manifest, preferred) {
     }
     return manifest.skin_packs[0];
 }
-
-//////////////////////////////////////////////////////////////////////////////////
 
 var MANIFEST_PATH = 'GUI_builder/gui_manifest.json';
 

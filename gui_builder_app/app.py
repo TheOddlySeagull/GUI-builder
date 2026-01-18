@@ -3275,34 +3275,36 @@ class GuiBuilderApp:
                 c["sheet"] = int(pos["sheet"])
                 c["tex"] = {"x": int(pos["x"]), "y": int(pos["y"])}
 
-                # Toggle buttons additionally expose the ON texture origin.
-                # Our packed block is 2x2: off (top-left), hover (bottom-left),
-                # on (top-right), disabled (bottom-right).
+                # Toggle buttons additionally expose the ON texture origin and a disabled origin.
+                # Our packed block is 2x2: unpressed (TL), hover (BL), pressed (TR), disabled (BR).
                 if str(c.get("type")) == "toggle_button":
-                    try:
-                        size = c.get("size_tiles") or {}
-                        w_tiles = int(size.get("w") or 0)
-                        h_tiles = int(size.get("h") or 0)
-                        w_px = int(w_tiles) * int(TILE_PX)
-                        h_px = int(h_tiles) * int(TILE_PX)
-                        if w_px > 0 and h_px > 0:
-                            c["toggle_tex"] = {"x": int(pos["x"]) + w_px, "y": int(pos["y"])}
-                            c["disabled_tex"] = {"x": int(pos["x"]) + w_px, "y": int(pos["y"]) + h_px}
-                    except Exception:
-                        pass
+                    size = c.get("size_tiles") or {}
+                    w_tiles = int(size.get("w") or 0)
+                    h_tiles = int(size.get("h") or 0)
+                    w_px = int(w_tiles) * int(TILE_PX)
+                    h_px = int(h_tiles) * int(TILE_PX)
+                    # Always emit these keys, fall back to base tex if sizes are missing.
+                    if w_px > 0 and h_px > 0:
+                        c["toggle_tex"] = {"x": int(pos["x"]) + w_px, "y": int(pos["y"])}
+                        c["disabled_tex"] = {"x": int(pos["x"]) + w_px, "y": int(pos["y"]) + h_px}
+                        c["toggle_disabled_tex"] = dict(c["disabled_tex"])  # alias for consumers expecting this name
+                    else:
+                        c["toggle_tex"] = dict(c["tex"])
+                        c["disabled_tex"] = dict(c["tex"])
+                        c["toggle_disabled_tex"] = dict(c["tex"])
 
                 # Standard buttons expose a disabled_tex pointing to the "locked" quadrant.
                 # (Our block is 2x2: base TL, hover BL, locked TR, locked_hover BR)
                 if str(c.get("type")) == "button":
-                    try:
-                        size = c.get("size_tiles") or {}
-                        w_tiles = int(size.get("w") or 0)
-                        h_tiles = int(size.get("h") or 0)
-                        w_px = int(w_tiles) * int(TILE_PX)
-                        if w_px > 0:
-                            c["disabled_tex"] = {"x": int(pos["x"]) + w_px, "y": int(pos["y"])}
-                    except Exception:
-                        pass
+                    size = c.get("size_tiles") or {}
+                    w_tiles = int(size.get("w") or 0)
+                    h_tiles = int(size.get("h") or 0)
+                    w_px = int(w_tiles) * int(TILE_PX)
+                    if w_px > 0:
+                        c["disabled_tex"] = {"x": int(pos["x"]) + w_px, "y": int(pos["y"])}
+                    else:
+                        # Fallback: use base tex if we cannot compute offset.
+                        c["disabled_tex"] = dict(c["tex"])
             if "_block_key" in c:
                 del c["_block_key"]
 
