@@ -10,53 +10,53 @@
     "background": "Background.png"
   },
   "ctm_origins": {
+
     "button_unpressed": {"module": [0, 0]},
-    "button_hover": {"module": [1, 0]},
+    "button_pressed": {"module": [0, 1]},
+    "button_unpressed_hover": {"module": [1, 0]},
+    "button_pressed_hover": {"module": [1, 1]},
+    "button_unpressed_locked": {"module": [2, 0]},
+    "button_pressed_locked": {"module": [2, 1]},
+    
+    "label": {"module": [2, 3]},
 
-    "button_toggle_on": {"module": [0, 1]},
-    "button_toggle_disabled": {"module": [1, 1]},
-
-    "button_toggle_locked_pressed": {"module": [2, 3]},
-
-    "text_unpressed": {"module": [2, 0]},
-
-    "item_slot": {"module": [2, 1]},
+    "item_slot": {"module": [3, 0]},
     "item_slot_locked": {"module": [3, 1]},
 
-    "text_entry_border": {"module": [0, 2]},
-    "text_entry_border_locked": {"module": [1, 2]},
+    "text_field": {"module": [0, 2]},
+    "text_field_locked": {"module": [1, 2]},
 
-    "select_list_border": {"module": [2, 2]},
-    "select_list_border_locked": {"module": [3, 2]},
+    "scroll_list": {"module": [2, 2]},
+    "scroll_list_locked": {"module": [3, 2]},
 
     "background_border": {"module": [0, 3]},
-    "button_background": {"module": [1, 3]},
-
-    "button_lock": {"module": [3, 0]}
+    "button_background": {"module": [1, 3]}
+    
   },
   "entry_tool_modules": {
     "button_standard": {
       "base": "button_unpressed",
-      "hover": "button_hover",
-      "locked": "button_lock"
+      "hover": "button_unpressed_hover",
+      "locked": "button_unpressed_locked"
     },
     "button_toggle": {
-      "base": "button_unpressed",
-      "hover": "button_hover",
-      "on": "button_toggle_on",
-      "disabled": "button_toggle_disabled",
-      "locked_pressed": "button_toggle_locked_pressed"
+      "base": "button_pressed",
+      "unpressed": "button_unpressed",
+      "hover_base": "button_pressed_hover",
+      "hover_unpressed": "button_unpressed_hover",
+      "unpressed_locked": "button_unpressed_locked",
+      "pressed_locked": "button_pressed_locked"
     },
     "text_slot": {
-      "base": "text_unpressed"
+      "base": "label"
     },
     "text_entry": {
-      "base": "text_entry_border",
-      "locked": "text_entry_border_locked"
+      "base": "text_field",
+      "locked": "text_field_locked"
     },
     "select_list": {
-      "base": "select_list_border",
-      "locked": "select_list_border_locked"
+      "base": "scroll_list",
+      "locked": "scroll_list_locked"
     },
     "item_slot": {
       "base": "item_slot",

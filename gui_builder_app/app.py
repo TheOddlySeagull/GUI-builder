@@ -2161,21 +2161,24 @@ class GuiBuilderApp:
 
         if ent.tool == Tool.BUTTON_TOGGLE:
             mapping = ENTRY_TOOL_MODULES.get(ent.tool, {})
+
+            # Keys: base (pressed/on), unpressed (off), hover_base, hover_unpressed, pressed_locked, unpressed_locked
             if locked:
-                if bool(ent.active):
-                    return str(
-                        mapping.get("locked_pressed")
-                        or mapping.get("disabled")
-                        or mapping.get("on")
-                        or mapping.get("base")
-                        or ""
-                    )
-                return str(mapping.get("disabled") or mapping.get("base") or "")
+                return str((mapping.get("pressed_locked") if bool(ent.active) else mapping.get("unpressed_locked")) or mapping.get("base") or "")
+
             if disabled:
-                return str(mapping.get("disabled") or mapping.get("base") or "")
+                return str(mapping.get("unpressed_locked") or mapping.get("pressed_locked") or mapping.get("unpressed") or "")
+
             if bool(ent.active):
-                return str(mapping.get("on") or mapping.get("pressed") or mapping.get("base") or "")
-            return str(mapping.get("hover" if hovered else "base") or "")
+                # Active/pressed state
+                if hovered and mapping.get("hover_base") is not None:
+                    return str(mapping.get("hover_base") or "")
+                return str(mapping.get("base") or mapping.get("unpressed") or "")
+
+            # Not active (unpressed/off)
+            if hovered and mapping.get("hover_unpressed") is not None:
+                return str(mapping.get("hover_unpressed") or "")
+            return str(mapping.get("unpressed") or mapping.get("base") or "")
 
         # Non-buttons: no hover variants. (Optional locked variant via meta.)
         mapping = ENTRY_TOOL_MODULES.get(ent.tool) or {}
@@ -2891,7 +2894,8 @@ class GuiBuilderApp:
             return False
 
         modules = ENTRY_TOOL_MODULES.get(ent.tool) or {}
-        base_module = modules.get("base")
+        # Toggle buttons use 'unpressed' or 'base' as the base visual.
+        base_module = modules.get("base") if ent.tool != Tool.BUTTON_TOGGLE else (modules.get("unpressed") or modules.get("base"))
         if not base_module:
             return False
 
@@ -2913,14 +2917,15 @@ class GuiBuilderApp:
         Layout (each cell is the component's own w*h in pixels):
         - Standard button: base | locked
                          hover | locked_hover (usually same as locked)
-        - Toggle button:   off  | on
-                         hover | disabled
+                - Toggle button:   off        | on
+                                                 hover_*     | disabled (locked)
+                    Where hover_* resolves to hover_on or hover_off depending on current ent.active
 
         Missing variants fall back to base so the JS can use a consistent layout.
         """
 
         modules = ENTRY_TOOL_MODULES.get(ent.tool) or {}
-        base_module = modules.get("base")
+        base_module = modules.get("base") if ent.tool != Tool.BUTTON_TOGGLE else (modules.get("unpressed") or modules.get("base"))
         if not base_module:
             return None
 
@@ -2946,27 +2951,34 @@ class GuiBuilderApp:
             return out
 
         if ent.tool == Tool.BUTTON_TOGGLE:
-            hover_module = modules.get("hover") or base_module
-            on_module = modules.get("on") or modules.get("pressed") or base_module
-            disabled_module = modules.get("disabled") or modules.get("pressed_hover") or on_module
+            # Keys: base (pressed/on), unpressed (off), hover_base, hover_unpressed, pressed_locked, unpressed_locked
+            pressed_module = modules.get("base") or base_module
+            unpressed_module = base_module  # Already set to unpressed or base above
+            
+            # Hover depends on active state
+            hover_module = (modules.get("hover_base") if bool(ent.active) else modules.get("hover_unpressed")) or base_module
 
             meta = ent.meta if isinstance(ent.meta, dict) else {}
-            if bool(meta.get("locked", False)) and bool(ent.active):
-                disabled_module = modules.get("locked_pressed") or disabled_module
+            if bool(meta.get("locked", False)):
+                disabled_module = modules.get("pressed_locked") if bool(ent.active) else modules.get("unpressed_locked")
+            else:
+                # Fallback to any locked variant or pressed_module
+                disabled_module = modules.get("pressed_locked") or modules.get("unpressed_locked") or pressed_module
 
-            off_img = self._compose_entry_variant_image(atlas, ent, str(base_module))
-            if off_img is None:
+            # Block layout: unpressed (TL), hover (BL), pressed (TR), disabled (BR)
+            unpressed_img = self._compose_entry_variant_image(atlas, ent, str(unpressed_module))
+            if unpressed_img is None:
                 return None
-            hover_img = self._compose_entry_variant_image(atlas, ent, str(hover_module)) or off_img
-            on_img = self._compose_entry_variant_image(atlas, ent, str(on_module)) or off_img
-            disabled_img = self._compose_entry_variant_image(atlas, ent, str(disabled_module)) or on_img
+            hover_img = self._compose_entry_variant_image(atlas, ent, str(hover_module)) or unpressed_img
+            pressed_img = self._compose_entry_variant_image(atlas, ent, str(pressed_module)) or unpressed_img
+            disabled_img = self._compose_entry_variant_image(atlas, ent, str(disabled_module)) or pressed_img
 
-            w = int(off_img.width())
-            h = int(off_img.height())
+            w = int(unpressed_img.width())
+            h = int(unpressed_img.height())
             out = tk.PhotoImage(width=w * 2, height=h * 2)
-            out.tk.call(out, "copy", off_img, "-from", 0, 0, w, h, "-to", 0, 0)
+            out.tk.call(out, "copy", unpressed_img, "-from", 0, 0, w, h, "-to", 0, 0)
             out.tk.call(out, "copy", hover_img, "-from", 0, 0, w, h, "-to", 0, h)
-            out.tk.call(out, "copy", on_img, "-from", 0, 0, w, h, "-to", w, 0)
+            out.tk.call(out, "copy", pressed_img, "-from", 0, 0, w, h, "-to", w, 0)
             out.tk.call(out, "copy", disabled_img, "-from", 0, 0, w, h, "-to", w, h)
             return out
 
