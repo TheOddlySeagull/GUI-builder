@@ -871,6 +871,7 @@ class GuiBuilderApp:
         self.sel_hover_text_var = tk.StringVar(value="")
         self.sel_locked_var = tk.BooleanVar(value=False)
         self.sel_label_var = tk.StringVar(value="")
+        self.sel_texture_var = tk.StringVar(value="")
 
         def apply_selected_meta() -> None:
             ent = self.entries.get(self.selected_entry_id) if self.selected_entry_id is not None else None
@@ -882,6 +883,8 @@ class GuiBuilderApp:
                 "enabled": bool(self.sel_hover_enabled_var.get()),
                 "text": str(self.sel_hover_text_var.get()),
             }
+            if ent.tool == Tool.TEXTURED_RECT:
+                meta["texture"] = str(self.sel_texture_var.get())
             ent.meta = meta
 
             # Displayed text/value is stored in ent.label for these tools.
@@ -936,6 +939,25 @@ class GuiBuilderApp:
 
         # Hidden by default; shown only for tools that use ent.label.
         self.sel_label_frame.pack_forget()
+
+        # Textured rect specific metadata (PNG texture path)
+        self.sel_texture_frame = tk.Frame(self.selection_frame)
+        self.sel_texture_frame.pack(fill="x", pady=(6, 0))
+        tk.Label(self.sel_texture_frame, text="Texture (PNG path)", font=("TkDefaultFont", 9, "bold")).pack(anchor="w")
+        self.sel_texture_hint = tk.Label(
+            self.sel_texture_frame,
+            text="Relative path or identifier used by your pack",
+            anchor="w",
+            justify="left",
+            wraplength=210,
+        )
+        self.sel_texture_hint.pack(anchor="w")
+        sel_texture_entry = tk.Entry(self.sel_texture_frame, textvariable=self.sel_texture_var)
+        sel_texture_entry.pack(fill="x")
+        sel_texture_entry.bind("<KeyRelease>", lambda _e: apply_selected_meta())
+        sel_texture_entry.bind("<FocusOut>", lambda _e: apply_selected_meta())
+        # Hidden by default; only for textured_rect
+        self.sel_texture_frame.pack_forget()
 
         # Button-specific metadata (for standard buttons)
         self.sel_button_meta_frame = tk.Frame(self.selection_frame)
@@ -1285,6 +1307,8 @@ class GuiBuilderApp:
                 self.sel_label_frame.pack_forget()
             if hasattr(self, "sel_button_meta_frame") and self.sel_button_meta_frame.winfo_ismapped():
                 self.sel_button_meta_frame.pack_forget()
+            if hasattr(self, "sel_texture_frame") and self.sel_texture_frame.winfo_ismapped():
+                self.sel_texture_frame.pack_forget()
             return
 
         # Ensure the selection panel is visible in its intended position.
@@ -1305,6 +1329,10 @@ class GuiBuilderApp:
             hover = {"enabled": False, "text": ""}
         self.sel_hover_enabled_var.set(bool(hover.get("enabled", False)))
         self.sel_hover_text_var.set(str(hover.get("text", "")))
+        # Load textured-rect specific field
+        if hasattr(self, "sel_texture_var"):
+            meta = ent.meta if isinstance(ent.meta, dict) else {}
+            self.sel_texture_var.set(str(meta.get("texture", "")))
 
         # Show/hide displayed text/value editor depending on tool.
         if hasattr(self, "sel_label_frame") and hasattr(self, "sel_label_title") and hasattr(self, "sel_label_hint"):
@@ -1338,6 +1366,18 @@ class GuiBuilderApp:
             else:
                 if self.sel_label_frame.winfo_ismapped():
                     self.sel_label_frame.pack_forget()
+
+        # Textured rect field visibility
+        if hasattr(self, "sel_texture_frame"):
+            if ent.tool == Tool.TEXTURED_RECT:
+                if not self.sel_texture_frame.winfo_ismapped():
+                    if hasattr(self, "clear_selection_btn"):
+                        self.sel_texture_frame.pack(fill="x", pady=(6, 0), before=self.clear_selection_btn)
+                    else:
+                        self.sel_texture_frame.pack(fill="x", pady=(6, 0))
+            else:
+                if self.sel_texture_frame.winfo_ismapped():
+                    self.sel_texture_frame.pack_forget()
 
         # Button options only apply to standard buttons.
         if hasattr(self, "sel_button_meta_frame"):
@@ -1403,6 +1443,8 @@ class GuiBuilderApp:
             return "Text slot"
         if ent.tool == Tool.ITEM_SLOT:
             return "Item slot"
+        if ent.tool == Tool.TEXTURED_RECT:
+            return "Textured rect"
 
         return ent.tool.value
 
@@ -2937,6 +2979,8 @@ class GuiBuilderApp:
             return "scroll_list"
         if tool == Tool.ITEM_SLOT:
             return "item_slot"
+        if tool == Tool.TEXTURED_RECT:
+            return "textured_rect"
         return str(tool.value)
 
     def _component_label_for_entry(self, ent: Entry) -> str:
@@ -3138,6 +3182,7 @@ class GuiBuilderApp:
                     Tool.TEXT_ENTRY,
                     Tool.SELECT_LIST,
                     Tool.ITEM_SLOT,
+                    Tool.TEXTURED_RECT,
                 )
                 if not include_in_manifest:
                     continue
@@ -3180,6 +3225,13 @@ class GuiBuilderApp:
 
                 if self._hover_text_enabled_for(ent):
                     comp["hover_text"] = self._format_hover_tooltip_text(ent)
+
+                # Extra manifest field for textured_rect
+                if ent.tool == Tool.TEXTURED_RECT:
+                    meta = ent.meta if isinstance(ent.meta, dict) else {}
+                    tex = str(meta.get("texture", "")).strip()
+                    if tex:
+                        comp["texture"] = tex
 
                 open_page = _resolved_open_page_for_button(pid=int(pid), ent=ent)
                 if open_page is not None:
@@ -3865,6 +3917,7 @@ class GuiBuilderApp:
             Tool.SELECT_LIST: "#d5c63a",
             Tool.TEXT_SLOT: "#aaaaaa",
             Tool.ITEM_SLOT: "#d53a3a",
+            Tool.TEXTURED_RECT: "#3ad58a",
         }
         fill = colors.get(ent.tool, "#666666")
 

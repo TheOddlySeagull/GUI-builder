@@ -61,6 +61,9 @@
     "item_slot": {
       "base": "item_slot",
       "locked": "item_slot_locked"
+    },
+    "textured_rect": {
+      "base": "item_slot_locked"
     }
   }
 }

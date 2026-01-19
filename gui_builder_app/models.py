@@ -13,6 +13,7 @@ class Tool(str, Enum):
     SELECT_LIST = "select_list"
     TEXT_SLOT = "text_slot"
     ITEM_SLOT = "item_slot"
+    TEXTURED_RECT = "textured_rect"
 
 
 SQUARE_ONLY = {
