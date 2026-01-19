@@ -2378,7 +2378,7 @@ class GuiBuilderApp:
         script += "\n".join(page_cases) + "\n"
         script += "    }\n"
         script += "}\n\n"
-        script += "function guiBuilder_updateManifest(manifest) {\n"
+        script += "function guiBuilder_updateManifest(event, manifest) {\n"
         script += "    // Modify the manifest as needed before building the GUI\n"
         script += "    // For example, if you want to make a locked button unlocked due to some conditions.\n"
         script += "    return manifest;\n"
