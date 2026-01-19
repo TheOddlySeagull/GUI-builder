@@ -2332,6 +2332,70 @@ class GuiBuilderApp:
             return False
         return True
 
+    def _write_gui_buttons_script(self, gui_root: str, manifest: Dict[str, Any], gui_name: str, *, quiet: bool = False) -> bool:
+        """Generate a gui_<gui_name>.js file with button handler skeleton.
+        
+        Creates a nested switch statement with a case for each page,
+        and for each page, a case for each button component.
+        """
+        pages = manifest.get("pages", [])
+        
+        # Generate inner cases for each page's buttons
+        page_cases = []
+        for page_info in pages:
+            page_id = page_info.get("page", 0)
+            components = page_info.get("components", [])
+            
+            # Filter for button-like components (buttons and toggle buttons)
+            button_components = [
+                c for c in components 
+                if c.get("type") in ("button", "toggle_button")
+            ]
+            
+            if button_components or True:  # Always include page case even if no buttons
+                # Generate button cases
+                button_cases = []
+                for comp in button_components:
+                    button_id = comp.get("id", 0)
+                    button_cases.append(f"                // case {button_id}:")
+                    button_cases.append(f"                //     // Do something")
+                    button_cases.append(f"                //     break;")
+                
+                # Build the page case
+                page_case = f"        case {page_id}:\n"
+                page_case += "            switch (buttonId) {\n"
+                if button_cases:
+                    page_case += "\n".join(button_cases) + "\n"
+                else:
+                    page_case += "                // Add button cases here\n"
+                page_case += "            }\n"
+                page_case += "            break;"
+                page_cases.append(page_case)
+        
+        # Build the full script
+        script = "function guiButtons(event, buttonId, pageId) {\n"
+        script += "    switch (pageId) {\n"
+        script += "\n".join(page_cases) + "\n"
+        script += "    }\n"
+        script += "}\n\n"
+        script += "function guiBuilder_updateManifest(manifest) {\n"
+        script += "    // Modify the manifest as needed before building the GUI\n"
+        script += "    // For example, if you want to make a locked button unlocked due to some conditions.\n"
+        script += "    return manifest;\n"
+        script += "}\n"
+        
+        # Write to file
+        filename = f"gui_{gui_name}.js"
+        path = os.path.join(gui_root, filename)
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(script)
+        except Exception as e:
+            if not quiet:
+                messagebox.showerror("Export textures", f"Failed writing {filename}:\n{e}")
+            return False
+        return True
+
     def _manifest_pages_payload(self, components: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Group flat component list into per-page entries for the manifest."""
 
@@ -3469,6 +3533,9 @@ class GuiBuilderApp:
         }
         if not self._write_gui_manifest(gui_root, gui_manifest):
             return
+        
+        if not self._write_gui_buttons_script(gui_root, gui_manifest, gui_folder):
+            return
 
         messagebox.showinfo(
             "Inject into Texture Pack",
@@ -3546,8 +3613,11 @@ class GuiBuilderApp:
 
         if not self._write_gui_manifest(gui_root, gui_manifest):
             return
+        
+        if not self._write_gui_buttons_script(gui_root, gui_manifest, gui_safe_name):
+            return
 
-        self.set_status("Exported textures + gui_manifest.json")
+        self.set_status("Exported textures + gui_manifest.json + gui_buttons.js")
         messagebox.showinfo(
             "Export textures",
             "Export complete.\n\nOutputs:\n"
@@ -3629,6 +3699,13 @@ class GuiBuilderApp:
             messagebox.showerror(
                 "Export all skin packs",
                 "Failed writing gui_manifest.json.",
+            )
+            return
+        
+        if not self._write_gui_buttons_script(gui_root, gui_manifest, gui_safe_name, quiet=True):
+            messagebox.showerror(
+                "Export all skin packs",
+                f"Failed writing gui_{gui_safe_name}.js.",
             )
             return
 
