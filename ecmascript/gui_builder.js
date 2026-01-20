@@ -388,7 +388,9 @@ function guiBuilder_pickSkinPack(manifest, preferred) {
     return manifest.skin_packs[0];
 }
 
-var MANIFEST_PATH = 'GUI_builder/gui_manifest.json';
+var GUI_SOURCE_BASE = 'world/customnpcs/scripts/ecmascript/modules/GUI_builder/guis/'; // Change this to your GUI scripts folder
+var GUI_NAME = 'item_purchase'; // Change this to your GUI name
+var MANIFEST_PATH = GUI_SOURCE_BASE + GUI_NAME + '/gui_manifest.json';
 
 function init(event) {
     var item = event.item;
