@@ -2236,14 +2236,7 @@ class GuiBuilderApp:
         if tile is None:
             return None
 
-        key = (
-            self.current_page_id,
-            self.grid_n,
-            self.cell_px,
-            self._skin_pack_name,
-            self._background_signature(),
-            self._preview_static_background_signature(),
-        )
+        key = (self.current_page_id, self.grid_n, self.cell_px, self._skin_pack_name, self._background_signature())
         if self._preview_background_cache_key == key and self._preview_background_image is not None:
             return self._preview_background_image
 
@@ -2261,54 +2254,9 @@ class GuiBuilderApp:
                 sy = y0 % src_h
                 self._copy_wrapped(img, tile, sx, sy, self.cell_px, self.cell_px, x0, y0)
 
-        # Bake textured_rect background directly into the background layer in preview.
-        # (The overlay image is drawn separately.)
-        if self._texture_sheet is not None:
-            for ent in self.entries.values():
-                if ent.tool != Tool.TEXTURED_RECT:
-                    continue
-                modules = ENTRY_TOOL_MODULES.get(ent.tool) or {}
-                base_module = modules.get("base")
-                if not base_module:
-                    continue
-                r = ent.rect.normalized()
-                cell_set = set(r.cells())
-                self._blit_ctm_cellset_to_preview_image(img, cell_set, str(base_module))
-
         self._preview_background_cache_key = key
         self._preview_background_image = img
         return img
-
-    def _preview_static_background_signature(self) -> str:
-        parts: List[str] = []
-        for ent in sorted(self.entries.values(), key=lambda e: int(e.entry_id)):
-            if ent.tool != Tool.TEXTURED_RECT:
-                continue
-            r = ent.rect.normalized()
-            parts.append(f"tr:{r.x0},{r.y0},{r.x1},{r.y1}")
-        return "|".join(parts)
-
-    def _blit_ctm_cellset_to_preview_image(self, dest: tk.PhotoImage, cell_set: "set[tuple[int,int]]", state_key: str) -> bool:
-        sheet = self._texture_sheet
-        if sheet is None:
-            return False
-
-        origin = CTM_ORIGINS.get(state_key)
-        if not origin:
-            return False
-
-        ox, oy = origin
-        for (cx, cy) in cell_set:
-            mask = self._ctm_mask(cell_set, cx, cy)
-            dx, dy = ctm_tile_offset(mask)
-            tile = sheet.get_tile(ox + dx, oy + dy, self.cell_px)
-            if tile is None:
-                return False
-            x0 = cx * self.cell_px
-            y0 = cy * self.cell_px
-            dest.tk.call(dest, "copy", tile, "-from", 0, 0, tile.width(), tile.height(), "-to", x0, y0)
-
-        return True
 
     def _load_texture_sheet(self) -> None:
         """Legacy no-op retained for compatibility.
@@ -3185,12 +3133,9 @@ class GuiBuilderApp:
             if overlay is None:
                 overlay = tk.PhotoImage(width=w_px, height=h_px)
 
-            out = tk.PhotoImage(width=w_px * 2, height=h_px * 2)
-            out.tk.call(out, "copy", overlay, "-from", 0, 0, w_px, h_px, "-to", 0, 0)
-            out.tk.call(out, "copy", overlay, "-from", 0, 0, w_px, h_px, "-to", 0, h_px)
-            out.tk.call(out, "copy", overlay, "-from", 0, 0, w_px, h_px, "-to", w_px, 0)
-            out.tk.call(out, "copy", overlay, "-from", 0, 0, w_px, h_px, "-to", w_px, h_px)
-            return out
+            # IMPORTANT: textured_rect has no hover/pressed variants.
+            # Export a single texture sized exactly to the rect.
+            return overlay
 
         modules = ENTRY_TOOL_MODULES.get(ent.tool) or {}
         base_module = modules.get("base") if ent.tool != Tool.BUTTON_TOGGLE else (modules.get("unpressed") or modules.get("base"))
@@ -3392,12 +3337,8 @@ class GuiBuilderApp:
                 if self._hover_text_enabled_for(ent):
                     comp["hover_text"] = self._format_hover_tooltip_text(ent)
 
-                # Extra manifest field for textured_rect
-                if ent.tool == Tool.TEXTURED_RECT:
-                    meta = ent.meta if isinstance(ent.meta, dict) else {}
-                    tex = str(meta.get("texture", "")).strip()
-                    if tex:
-                        comp["texture"] = tex
+                # NOTE: textured_rect overlay source path is editor-only (meta["texture"]).
+                # It is intentionally NOT exported into the gui_manifest.json.
 
                 open_page = _resolved_open_page_for_button(pid=int(pid), ent=ent)
                 if open_page is not None:
@@ -3424,12 +3365,27 @@ class GuiBuilderApp:
                             )
                         else:
                             block_key = ("button", w_tiles, h_tiles)
+                    elif ent.tool == Tool.TEXTURED_RECT:
+                        # Textured rect overlays can be deduplicated: same source + same size -> same exported texture.
+                        meta = ent.meta if isinstance(ent.meta, dict) else {}
+                        tex_raw = str(meta.get("texture", "") or "").strip()
+                        resolved = self._resolve_texture_path(tex_raw) if tex_raw else None
+                        if resolved:
+                            block_key = ("texrect", str(resolved), int(w_tiles), int(h_tiles))
+                        else:
+                            # Fallback if the texture path isn't set/valid.
+                            block_key = ("component", uid)
                     else:
                         block_key = ("component", uid)
 
-                    # Our exported block is always 2x2 variants (semantics depend on tool).
-                    block_w_px = w_px * 2
-                    block_h_px = h_px * 2
+                    # Buttons/toggles are exported as a 2x2 variant block.
+                    # Textured rect overlays have no variants: export a single block.
+                    if ent.tool == Tool.TEXTURED_RECT:
+                        block_w_px = w_px
+                        block_h_px = h_px
+                    else:
+                        block_w_px = w_px * 2
+                        block_h_px = h_px * 2
 
                     if block_key not in block_specs:
                         block_specs[block_key] = {
@@ -4036,8 +3992,8 @@ class GuiBuilderApp:
             if ent.tool == Tool.TEXTURED_RECT:
                 # Prefer textured base in preview; overlay comes from selected PNG.
                 drew_base = self._draw_entry_textured(ent)
-                self._draw_textured_rect_overlay_preview(ent)
-                if drew_base:
+                drew_overlay = self._draw_textured_rect_overlay_preview(ent)
+                if drew_base or drew_overlay:
                     return
             elif self._draw_entry_textured(ent):
                 # Keep debug labels in preview (can be removed later if you want a clean look)
@@ -4152,28 +4108,28 @@ class GuiBuilderApp:
             justify="center",
         )
 
-    def _draw_textured_rect_overlay_preview(self, ent: Entry) -> None:
+    def _draw_textured_rect_overlay_preview(self, ent: Entry) -> bool:
         meta = ent.meta if isinstance(ent.meta, dict) else {}
         tex_raw = str(meta.get("texture", "") or "").strip()
         if not tex_raw:
-            return
+            return False
 
         r = ent.rect.normalized()
         out_w = int(r.width()) * int(self.cell_px)
         out_h = int(r.height()) * int(self.cell_px)
         if out_w <= 0 or out_h <= 0:
-            return
+            return False
 
         resolved = self._resolve_texture_path(tex_raw)
         if not resolved:
-            return
+            return False
 
         key = (resolved, out_w, out_h)
         img = self._preview_textured_rect_cache.get(key)
         if img is None:
             img = self._load_png_resized(resolved, out_w=out_w, out_h=out_h)
             if img is None:
-                return
+                return False
             self._preview_textured_rect_cache[key] = img
 
         self._preview_textured_rect_live.append(img)
@@ -4181,6 +4137,8 @@ class GuiBuilderApp:
         x0 = self._canvas_offset_x + (int(r.x0) * int(self.cell_px))
         y0 = self._canvas_offset_y + (int(r.y0) * int(self.cell_px))
         self.canvas.create_image(x0, y0, anchor="nw", image=img)
+
+        return True
 
     def _draw_grid_lines(self) -> None:
         for i in range(self.grid_n + 1):
