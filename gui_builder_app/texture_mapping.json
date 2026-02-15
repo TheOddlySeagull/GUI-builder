@@ -63,7 +63,7 @@
       "locked": "item_slot_locked"
     },
     "textured_rect": {
-      "base": "item_slot_locked"
+      "base": "label"
     }
   }
 }
