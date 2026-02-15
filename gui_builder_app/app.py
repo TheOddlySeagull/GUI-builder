@@ -11,6 +11,11 @@ from tkinter import filedialog, messagebox
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 try:
+    from PIL import Image  # type: ignore
+except Exception:
+    Image = None  # type: ignore
+
+try:
     # Package import (normal): run via gui_builder.py
     from .models import Entry, PageState, Rect, SQUARE_ONLY, Tool
     from .texture import TextureSheet
@@ -122,6 +127,10 @@ class GuiBuilderApp:
 
         # Preview hover state
         self._preview_hover_entry_id: Optional[int] = None
+
+        # Preview overlay cache for textured_rect images (keep refs alive).
+        self._preview_textured_rect_cache: Dict[Tuple[str, int, int], tk.PhotoImage] = {}
+        self._preview_textured_rect_live: List[tk.PhotoImage] = []
 
         # Skin pack selection (Modules.png + Background.png)
         self._skin_pack_paths: Dict[str, Dict[str, str]] = {}
@@ -2088,6 +2097,83 @@ class GuiBuilderApp:
 
         return best_zoom, best_sub
 
+    def _resolve_texture_path(self, raw: str) -> Optional[str]:
+        p = str(raw or "").strip()
+        if not p:
+            return None
+        p = os.path.expanduser(os.path.expandvars(p))
+        if os.path.isabs(p):
+            return p
+        # Resolve relative paths against the current working directory.
+        return os.path.abspath(os.path.join(os.getcwd(), p))
+
+    def _resize_photoimage_nearest(self, src: tk.PhotoImage, out_w: int, out_h: int) -> tk.PhotoImage:
+        """Nearest-neighbor resize fallback when Pillow isn't installed."""
+
+        out_w = max(1, int(out_w))
+        out_h = max(1, int(out_h))
+        src_w = max(1, int(src.width()))
+        src_h = max(1, int(src.height()))
+
+        dst = tk.PhotoImage(width=out_w, height=out_h)
+
+        for y in range(out_h):
+            sy = int((y * src_h) / out_h)
+            if sy >= src_h:
+                sy = src_h - 1
+            row_colors: List[str] = []
+            for x in range(out_w):
+                sx = int((x * src_w) / out_w)
+                if sx >= src_w:
+                    sx = src_w - 1
+                c = src.get(sx, sy)
+                if isinstance(c, tuple) and len(c) >= 3:
+                    row_colors.append(f"#{int(c[0]):02x}{int(c[1]):02x}{int(c[2]):02x}")
+                else:
+                    row_colors.append(str(c))
+            dst.put("{" + " ".join(row_colors) + "}", to=(0, y))
+
+        return dst
+
+    def _load_png_resized(self, raw_path: str, *, out_w: int, out_h: int) -> Optional[tk.PhotoImage]:
+        """Load a PNG and stretch it to exactly out_w×out_h pixels."""
+
+        resolved = self._resolve_texture_path(raw_path)
+        if not resolved or (not os.path.isfile(resolved)):
+            return None
+
+        out_w = max(1, int(out_w))
+        out_h = max(1, int(out_h))
+
+        if Image is not None:
+            tmp_path = None
+            try:
+                with Image.open(resolved) as im:
+                    im = im.convert("RGBA")
+                    if im.size != (out_w, out_h):
+                        im = im.resize((out_w, out_h), resample=Image.NEAREST)
+                    fd, tmp_path = tempfile.mkstemp(suffix=".png")
+                    os.close(fd)
+                    im.save(tmp_path, format="PNG")
+                return tk.PhotoImage(file=tmp_path)
+            except Exception:
+                return None
+            finally:
+                if tmp_path and os.path.exists(tmp_path):
+                    try:
+                        os.remove(tmp_path)
+                    except Exception:
+                        pass
+
+        try:
+            src = tk.PhotoImage(file=resolved)
+        except Exception:
+            return None
+
+        if int(src.width()) == out_w and int(src.height()) == out_h:
+            return src
+        return self._resize_photoimage_nearest(src, out_w, out_h)
+
     def _get_scaled_background_tile(self) -> Optional[tk.PhotoImage]:
         src = self._skin_background_src
         if src is None:
@@ -2150,7 +2236,14 @@ class GuiBuilderApp:
         if tile is None:
             return None
 
-        key = (self.current_page_id, self.grid_n, self.cell_px, self._skin_pack_name, self._background_signature())
+        key = (
+            self.current_page_id,
+            self.grid_n,
+            self.cell_px,
+            self._skin_pack_name,
+            self._background_signature(),
+            self._preview_static_background_signature(),
+        )
         if self._preview_background_cache_key == key and self._preview_background_image is not None:
             return self._preview_background_image
 
@@ -2168,9 +2261,54 @@ class GuiBuilderApp:
                 sy = y0 % src_h
                 self._copy_wrapped(img, tile, sx, sy, self.cell_px, self.cell_px, x0, y0)
 
+        # Bake textured_rect background directly into the background layer in preview.
+        # (The overlay image is drawn separately.)
+        if self._texture_sheet is not None:
+            for ent in self.entries.values():
+                if ent.tool != Tool.TEXTURED_RECT:
+                    continue
+                modules = ENTRY_TOOL_MODULES.get(ent.tool) or {}
+                base_module = modules.get("base")
+                if not base_module:
+                    continue
+                r = ent.rect.normalized()
+                cell_set = set(r.cells())
+                self._blit_ctm_cellset_to_preview_image(img, cell_set, str(base_module))
+
         self._preview_background_cache_key = key
         self._preview_background_image = img
         return img
+
+    def _preview_static_background_signature(self) -> str:
+        parts: List[str] = []
+        for ent in sorted(self.entries.values(), key=lambda e: int(e.entry_id)):
+            if ent.tool != Tool.TEXTURED_RECT:
+                continue
+            r = ent.rect.normalized()
+            parts.append(f"tr:{r.x0},{r.y0},{r.x1},{r.y1}")
+        return "|".join(parts)
+
+    def _blit_ctm_cellset_to_preview_image(self, dest: tk.PhotoImage, cell_set: "set[tuple[int,int]]", state_key: str) -> bool:
+        sheet = self._texture_sheet
+        if sheet is None:
+            return False
+
+        origin = CTM_ORIGINS.get(state_key)
+        if not origin:
+            return False
+
+        ox, oy = origin
+        for (cx, cy) in cell_set:
+            mask = self._ctm_mask(cell_set, cx, cy)
+            dx, dy = ctm_tile_offset(mask)
+            tile = sheet.get_tile(ox + dx, oy + dy, self.cell_px)
+            if tile is None:
+                return False
+            x0 = cx * self.cell_px
+            y0 = cy * self.cell_px
+            dest.tk.call(dest, "copy", tile, "-from", 0, 0, tile.width(), tile.height(), "-to", x0, y0)
+
+        return True
 
     def _load_texture_sheet(self) -> None:
         """Legacy no-op retained for compatibility.
@@ -3032,6 +3170,28 @@ class GuiBuilderApp:
         Missing variants fall back to base so the JS can use a consistent layout.
         """
 
+        # Textured rect: export a stretched overlay image into the component sheet.
+        # (The textured_rect base/background is baked into the page background PNG.)
+        if ent.tool == Tool.TEXTURED_RECT:
+            r = ent.rect.normalized()
+            w_px = int(r.width()) * int(TILE_PX)
+            h_px = int(r.height()) * int(TILE_PX)
+            if w_px <= 0 or h_px <= 0:
+                return None
+
+            meta = ent.meta if isinstance(ent.meta, dict) else {}
+            tex_raw = str(meta.get("texture", "") or "").strip()
+            overlay = self._load_png_resized(tex_raw, out_w=w_px, out_h=h_px) if tex_raw else None
+            if overlay is None:
+                overlay = tk.PhotoImage(width=w_px, height=h_px)
+
+            out = tk.PhotoImage(width=w_px * 2, height=h_px * 2)
+            out.tk.call(out, "copy", overlay, "-from", 0, 0, w_px, h_px, "-to", 0, 0)
+            out.tk.call(out, "copy", overlay, "-from", 0, 0, w_px, h_px, "-to", 0, h_px)
+            out.tk.call(out, "copy", overlay, "-from", 0, 0, w_px, h_px, "-to", w_px, 0)
+            out.tk.call(out, "copy", overlay, "-from", 0, 0, w_px, h_px, "-to", w_px, h_px)
+            return out
+
         modules = ENTRY_TOOL_MODULES.get(ent.tool) or {}
         base_module = modules.get("base") if ent.tool != Tool.BUTTON_TOGGLE else (modules.get("unpressed") or modules.get("base"))
         if not base_module:
@@ -3187,7 +3347,13 @@ class GuiBuilderApp:
                 if not include_in_manifest:
                     continue
 
+                # Buttons use component textures; textured_rect can optionally export an overlay texture.
                 needs_texture = self._entry_requires_component_export(ent)
+                if ent.tool == Tool.TEXTURED_RECT:
+                    meta = ent.meta if isinstance(ent.meta, dict) else {}
+                    tex = str(meta.get("texture", "") or "").strip()
+                    if tex:
+                        needs_texture = True
 
                 uid = int(getattr(ent, "uid", 0) or 0)
                 if uid <= 0:
@@ -3796,6 +3962,9 @@ class GuiBuilderApp:
     def redraw(self) -> None:
         self.canvas.delete("all")
 
+        # Keep references to overlay images alive for this redraw.
+        self._preview_textured_rect_live = []
+
         bg_cells = {(x, y) for y in range(self.grid_n) for x in range(self.grid_n) if self.background[y][x]}
 
         # Background layer
@@ -3864,7 +4033,13 @@ class GuiBuilderApp:
     def _draw_entry(self, ent: Entry) -> None:
         # Preview: textured rendering using the selected skin pack modules (if available)
         if self.preview_mode and self._texture_sheet is not None:
-            if self._draw_entry_textured(ent):
+            if ent.tool == Tool.TEXTURED_RECT:
+                # Prefer textured base in preview; overlay comes from selected PNG.
+                drew_base = self._draw_entry_textured(ent)
+                self._draw_textured_rect_overlay_preview(ent)
+                if drew_base:
+                    return
+            elif self._draw_entry_textured(ent):
                 # Keep debug labels in preview (can be removed later if you want a clean look)
                 r = ent.rect.normalized()
                 x0 = self._canvas_offset_x + (r.x0 * self.cell_px)
@@ -3910,6 +4085,10 @@ class GuiBuilderApp:
                     )
                 return
 
+        # Fallback (edit mode or missing/failed skin pack texture): colored rectangles.
+        self._draw_entry_colored(ent)
+
+    def _draw_entry_colored(self, ent: Entry) -> None:
         colors = {
             Tool.BUTTON_STANDARD: "#3a7bd5",
             Tool.BUTTON_TOGGLE: "#b05cff",
@@ -3972,6 +4151,36 @@ class GuiBuilderApp:
             font=("TkDefaultFont", max(6, self.cell_px // 4)),
             justify="center",
         )
+
+    def _draw_textured_rect_overlay_preview(self, ent: Entry) -> None:
+        meta = ent.meta if isinstance(ent.meta, dict) else {}
+        tex_raw = str(meta.get("texture", "") or "").strip()
+        if not tex_raw:
+            return
+
+        r = ent.rect.normalized()
+        out_w = int(r.width()) * int(self.cell_px)
+        out_h = int(r.height()) * int(self.cell_px)
+        if out_w <= 0 or out_h <= 0:
+            return
+
+        resolved = self._resolve_texture_path(tex_raw)
+        if not resolved:
+            return
+
+        key = (resolved, out_w, out_h)
+        img = self._preview_textured_rect_cache.get(key)
+        if img is None:
+            img = self._load_png_resized(resolved, out_w=out_w, out_h=out_h)
+            if img is None:
+                return
+            self._preview_textured_rect_cache[key] = img
+
+        self._preview_textured_rect_live.append(img)
+
+        x0 = self._canvas_offset_x + (int(r.x0) * int(self.cell_px))
+        y0 = self._canvas_offset_y + (int(r.y0) * int(self.cell_px))
+        self.canvas.create_image(x0, y0, anchor="nw", image=img)
 
     def _draw_grid_lines(self) -> None:
         for i in range(self.grid_n + 1):
